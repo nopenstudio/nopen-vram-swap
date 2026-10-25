@@ -14,5 +14,7 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
       - name: Build
         run: cmake --build build --parallel
+      - name: Vulkan-only static safety contract
+        run: python3 tests/static_contract.py
       - name: Unit-level smoke test (no GPU required)
         run: ctest --test-dir build --output-on-failure
