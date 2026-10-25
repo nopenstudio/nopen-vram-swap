@@ -1,0 +1,18 @@
+name: CMake Linux Vulkan build
+on:
+  push:
+    branches: [main, 'develop/**']
+  pull_request:
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Vulkan development headers and loader
+        run: sudo apt-get update && sudo apt-get install -y libvulkan-dev
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Unit-level smoke test (no GPU required)
+        run: ctest --test-dir build --output-on-failure

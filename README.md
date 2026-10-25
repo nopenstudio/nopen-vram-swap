@@ -1,256 +1,45 @@
 # Nopen VRAM-SWAP
 
-**Experimental GPU VRAM-backed block storage for Linux**
+**0.10.0-alpha.1 · Vulkan VRAM mapping research · not a working Linux swap replacement**
 
-Developed by **Nopen Studio**
+Nopen Studio's research project testing whether dedicated GPU VRAM can serve as a Linux memory backing store. **The active implementation is now Vulkan-only**; OpenCL is not linked, installed, or required by the current CMake project.
 
-**Version:** 0.4.0 Beta  
-**Status:** Experimental Development  
-**Platform:** Linux  
-**Language:** C  
-**GPU Backend:** OpenCL  
-**Block Device Backend:** Linux NBD
+## Current version
 
----
+`nopen-vulkan-probe` selects a discrete Vulkan GPU, prints its memory heaps and types, requires **DEVICE_LOCAL + HOST_VISIBLE** memory, and verifies two rounds of page data via a mapped Vulkan buffer. It does **not** create a block device or enable Linux swap.
 
-## Overview
+> ⚠️ **Experimental:** Previous OpenCL/NBD swap prototypes froze the desktop and caused cascading SIGBUS process crashes. Vulkan cannot by itself fix the Linux NBD reclaim/deadlock problem. Do not enable swap with historical builds.
 
-Nopen VRAM-SWAP is an experimental Linux project exploring the possibility of using dedicated GPU video memory (VRAM) as a storage layer for system swap.
+## Build (Garuda / Arch Linux)
 
-Modern graphics cards often contain large amounts of dedicated high-bandwidth memory. While this memory is primarily intended for graphics and compute workloads, it can also be accessed through GPU computing APIs.
-
-Nopen VRAM-SWAP investigates whether this memory can be exposed to the Linux operating system as a virtual block device.
-
-The project uses AMD OpenCL for GPU memory management and the Linux Network Block Device (NBD) subsystem for block-level access.
-
-**The long-term objective is to develop a reliable GPU-backed swap solution for Linux.**
-
-At present, the project provides an experimental VRAM-backed block device. Reliable swap operation has not yet been demonstrated.
-
-## Architecture
-
-```text
-+----------------------------------+
-|           Linux System           |
-|                                  |
-|        Physical System RAM       |
-|                                  |
-|         Linux Swap Layer         |
-+----------------------------------+
-                 |
-                 v
-+----------------------------------+
-|       Linux NBD Subsystem        |
-|                                  |
-|           /dev/nbd15             |
-+----------------------------------+
-                 |
-                 v
-+----------------------------------+
-|         Nopen VRAM-NBD           |
-|                                  |
-|       Userspace C Backend        |
-|                                  |
-|     Block Request Processing     |
-+----------------------------------+
-                 |
-                 v
-+----------------------------------+
-|           AMD OpenCL             |
-|                                  |
-|       GPU Memory Allocation      |
-|       GPU Memory Transfers       |
-+----------------------------------+
-                 |
-                 v
-+----------------------------------+
-|             GPU VRAM             |
-|                                  |
-|       Experimental Storage       |
-|                                  |
-|             8 GiB                |
-+----------------------------------+
+```bash
+sudo pacman -S --needed cmake gcc vulkan-headers vulkan-icd-loader vulkan-tools vulkan-radeon
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+./build/nopen-vulkan-probe --list
+./build/nopen-vulkan-probe --mib 64 --samples 256
 ```
 
-The swap layer shown above represents the intended future integration. Current testing is limited to raw block-device operations.
+The default is a **64 MiB**, non-privileged probe. After inspecting the selected heap and available Vulkan budget, optionally try `--mib 256`, then `--mib 2048` at your own risk. Do **not** attempt a 2 GiB allocation with a game running.
 
-## Current Features
+## Structure
 
-- AMD GPU detection through OpenCL
-- Dedicated GPU memory allocation
-- Segmented VRAM allocation
-- Configurable virtual block-device capacity
-- Linux NBD integration
-- GPU-backed block read/write operations
-- Experimental memory locking
-- Multi-region data integrity testing
-- SHA-256 verification
-- VRAM release on normal shutdown
-- Command-line interface
+- `src/`: Vulkan-only implementation, no OpenCL symbols
+- `docs/ARCHITECTURE.md`: Vulkan BAR / memory mapping decision and limits
+- `docs/RELEASES.md`: chronological OpenCL research history and crash warnings
+- `.github/workflows/build.yml`: header/loader installation and CI build, GPU-independent `--help` smoke test
+- `legacy/archives/`: original experimental packages bundled in the downloadable source bundle (not executed or compiled)
 
-## Hardware Testing
+## Roadmap
 
-Development testing has been performed using:
+- `0.10.0-alpha.1`: probe memory types and perform CPU-mapped VRAM verification (**this release**)
+- `0.10.0-alpha.2`: repeated random 4 KiB I/O, validation and latency profiling
+- `0.10.0-beta.1`: optional NBD raw blocks *only after testing*
+- later beta: safe real swap experiments, if a forward-progress model can be demonstrated
+- `1.0.0`: reserved for reliability-qualified release
 
-| Component | Hardware |
-|---|---|
-| GPU | AMD Radeon RX 9060 XT |
-| GPU Memory | 16 GB GDDR6 |
-| GPU Architecture | gfx1200 |
-| CPU | AMD Ryzen 5 7500F |
-| Operating System | Garuda Linux |
-| Graphics API | OpenCL |
-| Block Device | Linux NBD |
+## Licensing
 
-### Verified Results
+New Vulkan implementation: MIT, see [LICENSE](LICENSE). Historical archive material should be reviewed separately before redistribution.
 
-**Beta 0.2**
-
-Successfully allocated 128 MiB of GPU memory and verified 16 MiB of block-device data.
-
-**Beta 0.3**
-
-Successfully allocated 8 GiB of GPU memory using 32 OpenCL segments.
-
-Verified data integrity at selected offsets, including segment boundaries and the end of the virtual device.
-
-**Beta 0.4**
-
-Successfully performed distributed block-device testing across an 8 GiB virtual device.
-
-Test results:
-
-- 64 independent regions
-- 4 MiB per region
-- 256 MiB total verified data
-- Successful read/write verification
-- No detected data corruption during the test
-
-These results demonstrate basic GPU-backed block-device functionality.
-
-They do not establish full-device integrity, sustained performance, or swap reliability.
-
-## Development Roadmap
-
-### Beta 0.4 — GPU Block Storage
-**Completed**
-
-- OpenCL memory allocation
-- NBD integration
-- Segmented GPU memory
-- 8 GiB virtual device
-- Distributed data verification
-
-### Beta 0.5 — Reliability Improvements
-**Planned**
-
-- Improved memory locking
-- Reduced memory allocation during I/O
-- Error handling improvements
-- Controlled shutdown behavior
-- GPU failure handling
-
-### Beta 0.6 — Experimental Swap
-**Planned**
-
-- Small-capacity swap testing
-- Swap priority experiments
-- Memory pressure testing
-- Deadlock investigation
-
-### Beta 0.7 — Performance
-**Planned**
-
-- Random I/O benchmarks
-- Sequential I/O benchmarks
-- PCIe transfer analysis
-- Latency measurements
-- Comparison with NVMe swap and ZRAM
-
-### Beta 0.8 — Integration
-**Planned**
-
-- Linux service integration
-- Configuration support
-- Device lifecycle management
-- Safer initialization and shutdown
-
-### Version 1.0
-**Long-term Goal**
-
-A documented and tested GPU-backed swap solution suitable for broader experimental use.
-
-A stable release depends on successful reliability and recovery testing.
-
-## Important Limitations
-
-GPU VRAM is not equivalent to conventional system RAM.
-
-Accessing GPU memory through OpenCL introduces additional software and transfer overhead.
-
-Performance depends on GPU architecture, PCIe bandwidth, driver behavior, and workload characteristics.
-
-The current implementation also depends on a userspace process and GPU drivers remaining operational.
-
-Under severe memory pressure, these dependencies may create deadlocks or system instability.
-
-GPU resets may cause the loss of data stored in VRAM.
-
-**Do not use the current version as production swap storage.**
-
-## Safety Warning
-
-This software is experimental.
-
-Possible consequences include:
-
-- System freezes
-- GPU driver resets
-- Application crashes
-- Data loss
-- Filesystem corruption if misused
-- Kernel I/O errors
-
-Do not run destructive block-device tests against devices containing important data.
-
-Do not enable swap on the experimental device without understanding the risks.
-
-Back up important files before testing.
-
-## Project Philosophy
-
-Nopen VRAM-SWAP explores unconventional approaches to Linux memory management.
-
-The goal is not to replace physical RAM or claim that GPU memory is universally faster than SSD storage.
-
-Instead, the project investigates whether unused dedicated GPU memory can provide an additional storage resource under controlled conditions.
-
-Research, experimentation, reproducibility, and transparent reporting are central to the project.
-
-## Contributing
-
-Contributions, bug reports, hardware compatibility tests, and technical discussions are welcome.
-
-Areas of particular interest include:
-
-- AMD OpenCL compatibility
-- Linux memory management
-- NBD reliability
-- GPU memory allocation
-- Swap deadlock prevention
-- PCIe performance
-- Kernel and driver interactions
-
-## Development
-
-**Nopen Studio**
-
-Independent software development and experimental systems research.
-
-## License
-
-License to be selected before the first public source release.
-
----
-
-**Nopen VRAM-SWAP — Exploring the boundaries between GPU memory and Linux storage.**
+[Turkish README](README_TR.md) · [Architecture](docs/ARCHITECTURE.md) · [Releases](docs/RELEASES.md)

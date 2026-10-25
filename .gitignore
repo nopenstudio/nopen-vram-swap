@@ -1,0 +1,10 @@
+/build/
+/build-*/
+*.o
+*.so
+*.core
+core.*
+*.tar.gz
+*.zip
+*.log
+!legacy/archives/*.zip
