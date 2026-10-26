@@ -1,45 +1,22 @@
-# Nopen VRAM-SWAP
+# Nopen VRAM-SWAP — v0.12.0-alpha.1
 
-**0.10.0-alpha.1 · Vulkan VRAM mapping research · not a working Linux swap replacement**
+**Current research:** isolated user-space GPU-backed memory pages. **Not Linux SWAP or extra system RAM.**
 
-Nopen Studio's research project testing whether dedicated GPU VRAM can serve as a Linux memory backing store. **The active implementation is now Vulkan-only**; OpenCL is not linked, installed, or required by the current CMake project.
+The new primary proof-of-concept lives in [v012/](v012/). It uses a discrete AMD OpenCL GPU as a 4 KiB page store and Linux `userfaultfd(UFFD_USER_MODE_ONLY)` to retrieve pages in a cooperating application. Pages are explicitly evicted using `MADV_DONTNEED`; no kernel-global reclaim path, NBD, `swapon`, privileged service, or kernel module is involved.
 
-## Current version
+**Status:** Source and mock-only tests built; hardware UFFD + OpenCL integration needs testing on Garuda. The former OpenCL+NBD real-swap experiments caused fatal Linux crashes, including PID 1 panic. **Do not re-enable those scripts.** This build does **not** transparently speed up Bannerlord or raise available RAM.
 
-`nopen-vulkan-probe` selects a discrete Vulkan GPU, prints its memory heaps and types, requires **DEVICE_LOCAL + HOST_VISIBLE** memory, and verifies two rounds of page data via a mapped Vulkan buffer. It does **not** create a block device or enable Linux swap.
-
-> ⚠️ **Experimental:** Previous OpenCL/NBD swap prototypes froze the desktop and caused cascading SIGBUS process crashes. Vulkan cannot by itself fix the Linux NBD reclaim/deadlock problem. Do not enable swap with historical builds.
-
-## Build (Garuda / Arch Linux)
+## Build (Garuda Linux)
 
 ```bash
-sudo pacman -S --needed cmake gcc vulkan-headers vulkan-icd-loader vulkan-tools vulkan-radeon
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-./build/nopen-vulkan-probe --list
-./build/nopen-vulkan-probe --mib 64 --samples 256
+cmake -S v012 -B build-v012 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+cmake --build build-v012 --parallel
+ctest --test-dir build-v012 --output-on-failure
+./build-v012/nopen-vram-lab --probe
+./build-v012/nopen-vram-lab --raw --backend opencl --mib 64 --pages 256 --rounds 3
+./build-v012/nopen-vram-lab --demo --backend opencl --mib 64 --pages 256 --rounds 3
 ```
 
-The default is a **64 MiB**, non-privileged probe. After inspecting the selected heap and available Vulkan budget, optionally try `--mib 256`, then `--mib 2048` at your own risk. Do **not** attempt a 2 GiB allocation with a game running.
+Read the [Turkish testing guide](v012/README_TR.md), [architecture and NopenOS roadmap](v012/docs/ARCHITECTURE_TR.md), and [0.12 changelog](v012/CHANGELOG.md).
 
-## Structure
-
-- `src/`: Vulkan-only implementation, no OpenCL symbols
-- `docs/ARCHITECTURE.md`: Vulkan BAR / memory mapping decision and limits
-- `docs/RELEASES.md`: chronological OpenCL research history and crash warnings
-- `.github/workflows/build.yml`: header/loader installation and CI build, GPU-independent `--help` smoke test
-- `legacy/archives/`: original experimental packages bundled in the downloadable source bundle (not executed or compiled)
-
-## Roadmap
-
-- `0.10.0-alpha.1`: probe memory types and perform CPU-mapped VRAM verification (**this release**)
-- `0.10.0-alpha.2`: repeated random 4 KiB I/O, validation and latency profiling
-- `0.10.0-beta.1`: optional NBD raw blocks *only after testing*
-- later beta: safe real swap experiments, if a forward-progress model can be demonstrated
-- `1.0.0`: reserved for reliability-qualified release
-
-## Licensing
-
-New Vulkan implementation: MIT, see [LICENSE](LICENSE). Historical archive material should be reviewed separately before redistribution.
-
-[Turkish README](README_TR.md) · [Architecture](docs/ARCHITECTURE.md) · [Releases](docs/RELEASES.md)
+Previous Vulkan (v0.10) prototype remains under `src/` with its separate top-level CMake build. Previous NBD source archives remain historical only; no old global swap experiment has been certified safe.
