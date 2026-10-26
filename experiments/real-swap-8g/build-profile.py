@@ -97,6 +97,19 @@ def extract_archive(archive,destination):
         if not (root/'nopen-vram-nbd.c').is_file():
             raise RuntimeError('Archive missing expected v0.9.3 folder')
         apply_patches(root)
+        # Python zipfile.extractall() does not preserve POSIX execute bits.
+        # All eight trusted shell scripts in the archived backend are executable;
+        # restore that property before publishing the isolated profile.
+        scripts = sorted(root.glob('*.sh'))
+        expected = {
+            'start-v093.sh', 'enable-v093.sh', 'disable-v093.sh',
+            'monitor-v093.sh', 'doctor-v093.sh', 'focus-probe-v093.sh',
+            'run-isolated-cycle.sh', 'collect-after-reboot.sh',
+        }
+        if {script.name for script in scripts} != expected:
+            raise RuntimeError('Archive shell script inventory changed; refusing profile build')
+        for script in scripts:
+            script.chmod(0o755)
         shutil.copytree(root,destination,copy_function=shutil.copy2)
     print(f'CREATED 8 GiB profile: {destination}\nNO SWAP ENABLED; no kernel settings changed.')
 
