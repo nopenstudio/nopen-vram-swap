@@ -14,7 +14,7 @@ for pair in 'read:73' 'write:73' 'corruption:74'; do
   expected="${pair##*:}"
   set +e
   "$LAB" --backend mock --pool-mib 4 --logical-pages 128 --ram-pages 8 \
-    --rounds 2 --inject-"$injection" >"$TMP/$injection.out" 2>&1
+    --rounds 2 "--inject-$(if [[ "$injection" == corruption ]]; then echo corruption; else echo "$injection-failure"; fi)" >"$TMP/$injection.out" 2>&1
   got="$?"
   set -e
   if [[ "$got" != "$expected" ]]; then
