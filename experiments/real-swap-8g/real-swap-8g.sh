@@ -6,7 +6,7 @@ ACTION="${1:-help}"
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd -- "$HERE/../.." && pwd)"
 ARCHIVE="$REPO/legacy/archives/Nopen_VRAM_NBD_v0.9.3_NBD_Stall_Diagnostics.zip"
-WORK="${NOPEN_8G_WORK:-$HOME/nopen-vram-experiment/nbd-8g-experiment}"
+WORK="${NOPEN_8G_WORK:-$HOME/nopen-vram-experiment/nbd-no-sync-kde-experiment}"
 SRC="$WORK/backend-8g"
 LOGS="$WORK/reports"
 DEVICE=/dev/nbd15
@@ -27,9 +27,15 @@ precheck() {
 }
 mem_avail() { awk '/^MemAvailable:/ {printf "%.0f",$2/1024}' /proc/meminfo; }
 check_prepared() {
-  [[ -x "$SRC/nopen-vram-nbd" && -f "$SRC/NOPEN_8G_PROFILE.txt" ]] || {
+  [[ -x "$SRC/nopen-vram-nbd" && -f "$SRC/NOPEN_8G_PROFILE.txt" && -f "$SRC/nopen-vram-nbd.c" ]] || {
     echo 'Run: real-swap-8g.sh prepare (8 GiB profile missing)' >&2; return 1;
   }
+  # Fail closed: never run an older 8GiB build with this no-sync experiment.
+  if grep -Eq 'O_DSYNC|log_event\("heartbeat_(reads|writes|errors)"' "$SRC/nopen-vram-nbd.c"; then
+    echo 'REFUSED: prepared backend contains legacy synchronous/heartbeat logging.' >&2
+    echo 'Use an empty NOPEN_8G_WORK and rerun prepare. Do not reuse the old 8GiB backend.' >&2
+    return 1
+  fi
 }
 check_active() {
   [[ "$(cat /sys/block/nbd15/size 2>/dev/null || echo 0)" == 16777216 ]] || {
@@ -58,6 +64,7 @@ case "$ACTION" in
       chmod 0755 "$SRC/$exe"
     done
     (cd "$SRC" && make clean && make -j2 && make test)
+    check_prepared
     for exe in start-v093.sh enable-v093.sh disable-v093.sh; do
       [[ -x "$SRC/$exe" ]] || { echo "Script still not executable: $exe" >&2; exit 2; }
     done
