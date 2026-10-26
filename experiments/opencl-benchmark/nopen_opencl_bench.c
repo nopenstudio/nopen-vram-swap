@@ -343,7 +343,7 @@ int main(int argc,char **argv) {
         else if(!strcmp(flag,"--device-index"))o.device_index=(int)tmp;
         else {fprintf(stderr,"Unknown option %s\n",flag);return 2;}
     }
-    if(o.cycles<1||o.cycles>3||!o.mib||o.mib>2048||!o.test_mib||o.test_mib>o.mib||
+    if(o.cycles<1||o.cycles>3||!o.mib||o.mib>8192||!o.test_mib||o.test_mib>o.mib||
        !o.chunk_mib||o.chunk_mib>32||o.chunk_mib>o.test_mib||
        !o.seg_mib||o.seg_mib>o.mib||o.seg_mib<o.chunk_mib||
        o.test_mib>o.seg_mib||!o.pages||o.pages>MAX_PAGES||
