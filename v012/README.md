@@ -1,18 +1,15 @@
-# Nopen VRAM-SWAP v0.12.0-alpha.1 — isolated GPU page lab
+# Nopen Memory Fabric v0.12.0-alpha.2
 
-This is a **non-system-swap** research prototype for a cooperative userspace page store. Linux `userfaultfd(UFFD_USER_MODE_ONLY)` resolves 4KiB missing faults from OpenCL GPU buffers; the caller must explicitly quiesce all readers/writers before eviction. Nothing touches `swapon`, `/dev/nbd`, PID 1, existing RAM policy, or a kernel module.
+**Ultimate goal: real Linux SWAP on NopenOS. Current status: explicit cooperating-process memory tier; NOT kernel swap.**
 
-**It is NOT extra RAM for arbitrary applications.** A game like Bannerlord cannot benefit until an explicit allocator integration or a separate, reliability-proven kernel architecture exists. Historical OpenCL NBD swap experiments caused full-system kernel panic; never reactivate those to test this build.
+New `nopen-vram-managed` demonstrates a bounded physical RAM page pool backed by discrete AMD GPU OpenCL buffers. Its 4KiB logical pages have ZERO / RESIDENT / GPU states and an LRU eviction policy. Full-page writes avoid a redundant GPU read. Reads validate 64-bit checksums before evicting live RAM pages. GPU read/write faults fail closed, without allowing NBD/SWAPON/PID1 interactions.
 
-Build and run (AMD discrete GPU/OpenCL headers/ICD required for the real backend):
+Build: `cmake -S v012 -B build-v012-a2 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON && cmake --build build-v012-a2 --parallel && ctest --test-dir build-v012-a2 --output-on-failure`
 
-```bash
-cmake -S v012 -B build-v012 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
-cmake --build build-v012 --parallel
-ctest --test-dir build-v012 --output-on-failure
-./build-v012/nopen-vram-lab --probe
-./build-v012/nopen-vram-lab --raw --backend opencl --mib 64 --pages 256 --rounds 3
-./build-v012/nopen-vram-lab --demo --backend opencl --mib 64 --pages 256 --rounds 3
-```
+Mock CLI: `./build-v012-a2/nopen-vram-managed --backend mock --pool-mib 4 --logical-pages 128 --ram-pages 8 --rounds 2`
 
-For mock-only CI `-DNOPEN_OPENCL=OFF`, and `--backend mock` explicitly. `--demo` requires kernel support for unprivileged user-only UFFD; the program never changes sysctls or privileges. Also read [Turkish guide](README_TR.md), [Architecture](docs/ARCHITECTURE_TR.md).
+GPU CLI (only after tests): `./build-v012-a2/nopen-vram-managed --backend opencl --pool-mib 64 --logical-pages 1024 --ram-pages 32 --rounds 3`
+
+The previous `nopen-vram-lab --demo` userfaultfd app demo remains available but is NOT yet wired to the new LRU manager. No transparent swapping of unmodified applications; that needs a separate, NopenOS-kernel-aware VM integration with preallocated reclaim-safe I/O and recoverable GPU failure semantics.
+
+[Turkish guide](README_TR.md) · [True swap roadmap](docs/TRUE_SWAP_ROADMAP_TR.md)

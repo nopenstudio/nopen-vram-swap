@@ -1,57 +1,65 @@
-# Nopen VRAM-SWAP v0.12.0-alpha.1 — Nopen Memory Fabric Lab
+# Nopen VRAM-SWAP v0.12.0-alpha.2 — yönetilen GPU sayfa havuzu
 
-**Durum:** Gerçek 8 GiB OpenCL aktarımı daha önce RX 9060 XT üzerinde doğrulandı. **Bu yeni v0.12 mimarisinin Garuda üzerinde gerçek GPU + userfaultfd birleşik testi henüz yapılmadı.**
+**Nihai hedef gerçek Linux SWAP'tir; bu sürüm henüz sistem SWAP'i değildir.** 26 Ekim kernel panic'ine yol açan NBD servisi bilerek kullanılmaz. Yeni program, kendi yönettiği bellek bölgesi için sınırlandırılmış RAM sayfalarını GPU belleğiyle değiştirir.
 
-**Yeni mimari:** Programın açıkça seçtiği anonim bir `mmap` bölgesinin 4 KiB sayfaları, Linux `userfaultfd` ile uygulama düzeyinde yönetilir. Kooperatif çıkarmada sayfa OpenCL GPU tamponuna kopyalanır, `MADV_DONTNEED` ile yalnızca bu programın RAM'inden çıkarılır ve sonraki erişimde sayfa hatası dinleyen iş parçacığı GPU'dan geri getirir. **Çalışması Linux SWAP/NBD gerektirmez.**
+## Gerçek RX 9060 XT testinden gelen sonuç
 
-- **Sistem genelinde SWAP değildir.** Bannerlord gibi değiştirilmemiş programlara otomatik RAM eklemez.
-- Root, kernel modülü, `/dev/nbd15`, `swapon`, sistem servisleri, sysctl değişikliği, `mlockall` yoktur.
-- OpenCL sadece AMD ayrık GPU'da başlar; GPU bulunamazsa RAM'e gizlice düşmez. `mock` açıkça seçilmedikçe kullanılmaz.
-- **Kooperatif:** Sayfa çıkarılırken aynı bellek üzerinde eşzamanlı okuma/yazma yapılmamalı. Genel amaçlı eşzamanlı MMU/dirty-tracking bu alfa sürümünde yok.
-- GPU hata verirse yalnızca demo sürecinin sonlanması mümkün; sistem takas sayfaları etkilenmez.
-- Varsayılan kapasite 64 MiB, maksimum 8192 MiB. Oyunu çalıştırırken 8 GiB ayırmayın.
+v0.12.0-alpha.1, 64 MiB ayrık AMD OpenCL depolama alanında üç tur 256 adet 4 KiB sayfanın doğrulanması ve `userfaultfd` sayfa geri getirmesini başarıyla geçti: `faults=1024`, `restored=768`, `no_global_swap=YES`. Bu sistem genelinde RAM kazanımı demek değildir.
 
-## Kurulum (Garuda)
+## alpha.2 yenilikleri
 
-```bash
-sudo pacman -S --needed cmake gcc opencl-headers ocl-icd opencl-clhpp opencl-icd-loader
-# Kurulu amdgpu OpenCL ICD'nizi koruyun; harici ICD olmadan gerçek GPU modu çalışmayabilir.
-cd ~/nopen-vram-swap
-# bu dal: develop/v0.12.0-alpha.1
-cmake -S v012 -B build-v012 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
-cmake --build build-v012 --parallel
-ctest --test-dir build-v012 --output-on-failure
-```
+- `nopen_vram_memory` kütüphanesi: ZERO / RAM / GPU mantıksal sayfa durumları, RAM sayfası başına 4096 bayt.
+- `--ram-pages` ile üst sınırı sabitlenen RAM resident havuzu; LRU'ya göre en eski sayfa GPU'ya taşınır.
+- Gerçek OpenCL GPU tamponu sayfaları depolar; istenen sayfa yeniden GPU'dan okunur.
+- GPU veri bütünlüğü için 64-bit hızlı checksum; yanlış sayfa geri döndürülmez.
+- GPU yazma başarısızsa RAM'deki sayfanın son geçerli kopyası korunur. GPU okuma başarısızsa çalışan RAM sayfaları atılmaz.
+- Yerel Release ve ASan/UBSan koşularında 5 test PASS. Gerçek AMD GPU'da yeni **managed** yol henüz test edilmedi.
+- Önceki alpha.1 `nopen-vram-lab --demo` korunur, ancak **henüz yeni LRU yöneticisiyle entegre değildir**. Bu bağ, alpha.3'ün hedefidir.
 
-> Arch/Garuda paket adları depoya göre değişebilir. Bir paket bulunamazsa tüm sistem yazılımını kaldırmaya/kernelsiz bırakmaya çalışmayın; `pacman -Ss 'opencl|ocl-icd'` ile karşılığını bulun. Var olan OpenCL testiniz çalıştığı için büyük olasılıkla derleyici ve ICD zaten kurulu.
+**Kapsam:** tek iş parçacıklı/kooperatif API. Arbitrary malloc/Steam/Bannerlord belleğini izleyemez. Sistem genelinde `swapon`, `/dev/nbd`, root ve kernel modülü kullanmaz. ZRAM ayarlarını değiştirmez.
 
-Önce düşük riskli test:
+## Derleme — Garuda Linux
+
+Eski alpha.1 çalışma klasöründen bu ayrı dala geç:
 
 ```bash
-swapon --show   # yalnızca mevcut zram; NBD açık olmamalı
-./build-v012/nopen-vram-lab --self-audit
-./build-v012/nopen-vram-lab --probe
-./build-v012/nopen-vram-lab --raw --backend mock --mib 4 --pages 128 --rounds 2
-./build-v012/nopen-vram-lab --demo --backend mock --mib 4 --pages 128 --rounds 2
+cd ~/nopen-v012-lab
+git fetch origin develop/v0.12.0-alpha.2
+git switch -c develop/v0.12.0-alpha.2 --track origin/develop/v0.12.0-alpha.2
+cmake -S v012 -B build-v012-a2 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+cmake --build build-v012-a2 --parallel
+ctest --test-dir build-v012-a2 --output-on-failure
+swapon --show
 ```
 
-`--probe` `UFFD_UNAVAILABLE` verirse normal kullanıcı `userfaultfd(UFFD_USER_MODE_ONLY)` kullanamıyor demektir. **Sysctl ayarlarını ve güvenlik kısıtlarını otomatik gevşetmeyin.** `--raw` testi yine çalışır; `--demo` gerçek sayfa hatası sınaması yapılamaz.
+`swapon --show` üzerinde yalnızca **önceden kullandığın ZRAM** olmalı; `/dev/nbd15` hâlâ etkinse deneme başlatma.
 
-Sadece bunlar geçerse gerçek GPU testi, **oyun kapalıyken**:
+## İlk yönetilen bellek testi
 
 ```bash
-./build-v012/nopen-vram-lab --raw --backend opencl --mib 64 --pages 256 --rounds 3
-./build-v012/nopen-vram-lab --demo --backend opencl --mib 64 --pages 256 --rounds 3
+./build-v012-a2/nopen-vram-managed --backend mock --pool-mib 4 --logical-pages 256 --ram-pages 8 --rounds 2
 ```
 
-`ROUND_PASS` her tekrarın doğrulamasıdır. `TEST_PASS ... mode=userfaultfd backend=opencl ... restored=...` ise kooperatif sayfa çıkarma / GPU sayfa geri getirmenin ilk gerçek kanıtıdır. `restored` sıfır olmamalıdır.
+Bu komut 1MiB mantıksal çalışma kümesini yalnızca **32KiB resident CPU belleğiyle** yönetmeye çalışır. Mock test GPU kullanmaz.
 
-**Bu aşamada Bannerlord ile hiçbir gerçek NBD/SWAP deneyi yapmayın.** v0.12'nin hedefi önce ayrı uygulama alanında hatasız ileriye ilerleme sağlamaktır. Oyun ancak API entegrasyonu veya daha sonra güvenli sistem mimarisi kurulduktan sonra hedef olur.
+Gerçek kart için, **Bannerlord kapalıyken** ve sistem kararlı durumdayken:
 
-## Geliştirici sınırları
+```bash
+timeout -s TERM -k 5s 120s ./build-v012-a2/nopen-vram-managed \
+  --backend opencl --pool-mib 64 --logical-pages 1024 --ram-pages 32 --rounds 3
+```
 
-`nopen-vram-lab --raw`: UFFD olmadan 4 KiB GPU deposu testidir. GPU transferinden önce/sonra veriyi doğrular. `--demo`: anonim mmap üzerinde userfaultfd eksik sayfa olaylarını yönetir. Demo aktif iken başlangıçta sayfalar demand fault ile sıfır olarak doldurulur, pattern yazılır, GPU'ya verilir, `madvise` ile RAM'den çıkarılır; yeniden erişimde OpenCL'den doğru sayfa `UFFDIO_COPY` ile dönmelidir.
+Burada 64MiB GPU tamponu önceden ayrılır. Mantıksal verinin 4MiB'si kullanılır; en fazla 128KiB RAM resident havuzu vardır (test kodunun, OpenCL sürücüsünün, sayfa tablolarının ve DMA sürücüsü tahsislerinin RAM'i hariç). Kopyalar RAM'e geri getirildikten sonra bit bit doğrulanır.
 
-Performans sayısı doğrulama dahil tüm test döngüsünün uygulama-tabanlı brüt I/O oranıdır; önceki bağımsız OpenCL sıralı transfer bant genişliğiyle kıyaslanmamalıdır. Herhangi bir UFFD `EPERM`, `ENOSYS`, `EINVAL` vb. hatası olması GPU'nun kusurlu olduğu anlamına gelmez.
+Beklenen çıktı:
 
-Mimari ve gelecekte NopenOS entegrasyon şartları: `docs/ARCHITECTURE_TR.md`.
+```text
+ROUND_PASS round=1 ...
+ROUND_PASS round=2 ...
+ROUND_PASS round=3 ...
+MANAGED_PASS version=0.12.0-alpha.2 backend=opencl ... pageouts=... pageins=... no_global_swap=YES
+```
+
+`pageouts` ve `pageins` değerleri sıfırdan büyük olmalı, `corruptions`, `read_failures`, `write_failures` sıfır olmalı. Sadece bu kabul edilirse daha büyük ve eşzamanlı testleri konuşacağız.
+
+> **Bannerlord üzerinde bu dalda gerçek SWAP açma!** Bu sürümde PID 1'i etkilemeyen denetimli bellek deposu geliştiriliyor. Sonraki kernel entegrasyonu için şartlar [gerçek SWAP yol haritası](docs/TRUE_SWAP_ROADMAP_TR.md) belgesinde.

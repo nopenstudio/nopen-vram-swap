@@ -1,0 +1,35 @@
+name: v0.12.0-alpha.2 cooperative VRAM memory tier (NO SWAP)
+on:
+  push:
+    branches: ["develop/v0.12.0-alpha.2"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  release-mock-and-sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Release mock (asserts cannot be disabled)
+        run: |
+          cmake -S v012 -B build-release -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-release --parallel
+          ctest --test-dir build-release --output-on-failure
+          ./build-release/nopen-vram-managed --backend mock --pool-mib 4 --logical-pages 256 --ram-pages 8 --rounds 2
+      - name: AddressSanitizer and UndefinedBehaviorSanitizer
+        run: |
+          cmake -S v012 -B build-asan -DCMAKE_BUILD_TYPE=Debug -DNOPEN_OPENCL=OFF -DCMAKE_C_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+          cmake --build build-asan --parallel
+          ctest --test-dir build-asan --output-on-failure
+  opencl-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenCL headers (CI GPU not required)
+        run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev opencl-headers
+      - name: Build OpenCL backend and run mock-only tests
+        run: |
+          cmake -S v012 -B build-gpu -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+          cmake --build build-gpu --parallel
+          ctest --test-dir build-gpu --output-on-failure
+          ./build-gpu/nopen-vram-managed --help

@@ -1,14 +1,16 @@
 # Research release chronology
 
-**Current active experiment: v0.12.0-alpha.1 — Nopen Memory Fabric Lab.** Cooperative application-level GPU-backed 4 KiB pages using user-only `userfaultfd` and OpenCL. **No NBD, no Linux SWAP, no game-transparent RAM extension.**
-
-Historical Vulkan v0.10 probe remains in `src/`. Earlier OpenCL+NBD system swap experiments are explicitly **unsafe** after the 2026-10-26 Bannerlord/PID1 crash.
+**Current experiment: v0.12.0-alpha.2 — bounded, process-local GPU-backed LRU page management.** NopenOS system SWAP remains the strategic target, not an existing product.
 
 | Family | Scope | Status |
 |---|---|---|
-| v0.9.2 and v0.9.3 | OpenCL + NBD real Linux swap | **UNSAFE**: NBD stalls, SIGBUS, PID1 panic |
-| v0.10.0-alpha.1 | Vulkan mapped VRAM probe | Archived research; no swap |
-| v0.10.0-alpha.2 | OpenCL PCIe DMA benchmark on experimental branch | 8 GiB full verify on RX 9060 XT, no swap |
-| **v0.12.0-alpha.1** | **OpenCL GPU store + cooperative UFFD page lab** | **Mock/unit build passed; Garuda GPU+UFFD integration unverified** |
+| v0.9.2 and v0.9.3 | OpenCL + NBD real Linux swap | **UNSAFE:** dead NBD connection, SIGBUS, PID1 panic |
+| v0.10.0-alpha.1 | Vulkan host-visible VRAM probe | Historical experiment; no swap |
+| v0.10.0-alpha.2 | OpenCL PCIe DMA benchmark | Verified 8 GiB VRAM on RX 9060 XT; no swap |
+| v0.12.0-alpha.1 | OpenCL + `userfaultfd` cooperating application | RX 9060 XT: 64 MiB store, 768 page restores PASS |
+| **v0.12.0-alpha.2** | **Bounded CPU page slots + LRU / full-page GPU swap simulation** | Mock/CI and sanitizers PASS; real GPU managed test pending |
+| Future NopenOS kernel integration | Linux VM swap-out/swap-in with reclaim-safe DMA, GPU reset handling | Design stage only |
 
-See [new architecture](../v012/docs/ARCHITECTURE_TR.md) and [version notes](../v012/CHANGELOG.md). The older `legacy/archives/` packages are kept for historical research only. Do not enable old swap services.
+Read [the architecture and true-swap acceptance gates](../v012/docs/TRUE_SWAP_ROADMAP_TR.md).
+
+Do not launch historical NBD swap scripts on a machine with important work.

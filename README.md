@@ -1,22 +1,29 @@
-# Nopen VRAM-SWAP — v0.12.0-alpha.1
+# Nopen VRAM-SWAP — v0.12.0-alpha.2
 
-**Current research:** isolated user-space GPU-backed memory pages. **Not Linux SWAP or extra system RAM.**
+**Research goal: real Linux SWAP on NopenOS. Current milestone: bounded, process-local VRAM memory tier — NOT system SWAP.**
 
-The new primary proof-of-concept lives in [v012/](v012/). It uses a discrete AMD OpenCL GPU as a 4 KiB page store and Linux `userfaultfd(UFFD_USER_MODE_ONLY)` to retrieve pages in a cooperating application. Pages are explicitly evicted using `MADV_DONTNEED`; no kernel-global reclaim path, NBD, `swapon`, privileged service, or kernel module is involved.
+We retired the unsafe OpenCL+NBD global swap path after real GPU load caused system-wide SIGBUS and PID1 panic (2026-10-26). The replacement does not make OpenCL disappear: it treats discrete AMD GPU VRAM as a page store but keeps global Linux memory reclaim and system swap outside the experiment until a kernel-grade forward-progress and GPU-failure model is demonstrated.
 
-**Status:** Source and mock-only tests built; hardware UFFD + OpenCL integration needs testing on Garuda. The former OpenCL+NBD real-swap experiments caused fatal Linux crashes, including PID 1 panic. **Do not re-enable those scripts.** This build does **not** transparently speed up Bannerlord or raise available RAM.
+## New: managed page memory (v0.12.0-alpha.2)
 
-## Build (Garuda Linux)
+- ZERO / resident RAM / VRAM page table for 4 KiB logical pages
+- Strict, user-controlled resident RAM page limit and LRU victim selection
+- GPU page-out/page-in via OpenCL or explicit mock backend; CRC-like 64-bit error-detecting digest on page-in
+- Invalid GPU pages are refused; failed page-out retains the last live CPU page
+- Process-local `madvise(MADV_DONTNEED)` on evicted staging pages, no NBD, SWAPON, root privileges, or kernel module
+
+Build on Garuda:
 
 ```bash
-cmake -S v012 -B build-v012 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
-cmake --build build-v012 --parallel
-ctest --test-dir build-v012 --output-on-failure
-./build-v012/nopen-vram-lab --probe
-./build-v012/nopen-vram-lab --raw --backend opencl --mib 64 --pages 256 --rounds 3
-./build-v012/nopen-vram-lab --demo --backend opencl --mib 64 --pages 256 --rounds 3
+cmake -S v012 -B build-v012-a2 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+cmake --build build-v012-a2 --parallel
+ctest --test-dir build-v012-a2 --output-on-failure
+./build-v012-a2/nopen-vram-managed --backend mock --pool-mib 4 --logical-pages 256 --ram-pages 8 --rounds 2
+./build-v012-a2/nopen-vram-managed --backend opencl --pool-mib 64 --logical-pages 1024 --ram-pages 32 --rounds 3
 ```
 
-Read the [Turkish testing guide](v012/README_TR.md), [architecture and NopenOS roadmap](v012/docs/ARCHITECTURE_TR.md), and [0.12 changelog](v012/CHANGELOG.md).
+The alpha.1 userfaultfd pager remains as `nopen-vram-lab`, separate from the new bounded LRU manager. Merging them and subsequently designing the NopenOS kernel VM interface are future work. Neither the executable nor the existing libraries extend unmodified Bannerlord's RAM yet.
 
-Previous Vulkan (v0.10) prototype remains under `src/` with its separate top-level CMake build. Previous NBD source archives remain historical only; no old global swap experiment has been certified safe.
+[Turkish guide](v012/README_TR.md) · [True Linux SWAP architecture gates](v012/docs/TRUE_SWAP_ROADMAP_TR.md) · [Release notes](v012/CHANGELOG.md).
+
+The old Vulkan v0.10 research probe remains available at repository root with its own top-level CMake project. Historical real swap ZIP archives are **not safe to launch**.

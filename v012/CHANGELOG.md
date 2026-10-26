@@ -1,8 +1,12 @@
-# 0.12.0-alpha.1 (2026-10-26)
+# v0.12.0-alpha.2 — managed process-local VRAM tier
 
-- Replaced the research direction: OS-global NBD swap is NOT used by the new prototype.
-- OpenCL discrete AMD page store, explicit `mock` for test-only operation, 4KiB get/put.
-- Linux UFFD_USER_MODE_ONLY missing-page handler with cooperative store-to-VRAM+MADV_DONTNEED+fault-in from VRAM.
-- Full bytewise verification, repeated rounds, bounds checks, corruption detection and injected failures.
-- Two independent CI configurations (mock-only, OpenCL compile without GPU).
-- NopenOS integration design and explicit release gates. Not a production/system memory manager.
+- Added page table with ZERO, CPU-resident, and GPU-backed states.
+- Bounded 4KiB resident slot pool with LRU victim selection.
+- Full-page writes and explicit page-out/page-in via `nopen_store` OpenCL or mock.
+- FNV-1a 64-bit error-detection check on each restored GPU-backed page.
+- Read failure/corruption never silently fabricates a zero page or drops a live resident page; write failure leaves the last valid RAM copy intact.
+- Explicit trimming calls MADV_DONTNEED on CPU staging pages (the only process affected).
+- Managed CLI and unit tests; test assertions always execute in Release builds.
+- Kept alpha.1 `userfaultfd` sample independent, slated for integration in alpha.3.
+- **Not yet system SWAP, block device, NopenOS kernel module or Bannerlord RAM extension.**
+- Originated after real RX 9060 XT alpha.1: 64MiB/768 restores success and prior v0.9 NBD-induced PID1 panic.
