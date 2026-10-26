@@ -1,7 +1,7 @@
 name: Experimental 8GiB NBD profile source verification
 on:
   push:
-    branches: ["experiments/8g-real-swap"]
+    branches: ["experiments/8g-real-swap", "experiments/nbd-no-sync-logging"]
   workflow_dispatch:
 permissions:
   contents: read
@@ -25,6 +25,8 @@ jobs:
           test -x /tmp/nopen-8g-backend/start-v093.sh
           test -x /tmp/nopen-8g-backend/enable-v093.sh
           test -x /tmp/nopen-8g-backend/disable-v093.sh
+          ! grep -q 'O_DSYNC' /tmp/nopen-8g-backend/nopen-vram-nbd.c
+          ! grep -q 'log_event("heartbeat_reads"' /tmp/nopen-8g-backend/nopen-vram-nbd.c
       - name: Verify 8 GiB OpenCL benchmark builds (NO GPU / NO SWAP)
         run: |
           cmake -S experiments/opencl-benchmark -B /tmp/nopen-opencl-8g -DCMAKE_BUILD_TYPE=Release
