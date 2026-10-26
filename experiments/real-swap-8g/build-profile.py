@@ -19,6 +19,14 @@ PATCHES = {
         ('mb != 2048', 'mb != 8192'),
         ('with --mib 2048 (2 GiB)', 'with --mib 8192 (8 GiB)'),
         ('Nopen v0.9.3: 2048 MiB %s.', 'Nopen v0.9.3: 8192 MiB %s.'),
+        # Both writes remain async-signal-safe; explicit results satisfy
+        # Ubuntu/Debian _FORTIFY_SOURCE + -Werror=unused-result builds.
+        ('(void)write(STDERR_FILENO,msg,n);',
+         'ssize_t diagnostic_n = write(STDERR_FILENO,msg,n); (void)diagnostic_n;'),
+        ('if(crash_log_fd>=0) (void)write(crash_log_fd,msg,n);',
+         'if(crash_log_fd>=0) { diagnostic_n = write(crash_log_fd,msg,n); (void)diagnostic_n; }'),
+        ('if (crash_log_fd >= 0) (void)write(crash_log_fd, msg, (size_t)n);',
+         'if (crash_log_fd >= 0) { ssize_t event_n = write(crash_log_fd, msg, (size_t)n); (void)event_n; }'),
     ],
     'start-v093.sh': [
         ('The 2 GiB GPU reservation', 'The 8 GiB GPU reservation'),
