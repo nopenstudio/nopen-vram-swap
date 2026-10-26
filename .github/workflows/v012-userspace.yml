@@ -1,0 +1,37 @@
+name: v0.12 isolated userspace pager (no SWAP)
+on:
+  push:
+    branches: ["develop/v0.12.0-alpha.1"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pure-userspace-mock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile mock-only store + UFFD lab
+        run: |
+          cmake -S v012 -B build-v012-mock -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-v012-mock --parallel
+          ctest --test-dir build-v012-mock --output-on-failure
+          ./build-v012-mock/nopen-vram-lab --raw --backend mock --mib 4 --pages 128 --rounds 2
+      - name: Run UFFD if runner permits user-only faults (otherwise explicit SKIP)
+        run: |
+          if ./build-v012-mock/nopen-vram-lab --probe; then
+            ./build-v012-mock/nopen-vram-lab --demo --backend mock --mib 4 --pages 128 --rounds 2
+          else
+            echo 'SKIP: GitHub runner kernel/seccomp does not permit userfaultfd; real Garuda test required.'
+          fi
+  compile-opencl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenCL headers and ICD loader (no GPU)
+        run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev opencl-headers
+      - name: Compile real OpenCL backend and run mock unit tests
+        run: |
+          cmake -S v012 -B build-v012 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+          cmake --build build-v012 --parallel
+          ctest --test-dir build-v012 --output-on-failure
+          ./build-v012/nopen-vram-lab --help

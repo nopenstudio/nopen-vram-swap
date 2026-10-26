@@ -1,0 +1,146 @@
+#define _GNU_SOURCE
+#include "nopen_store.h"
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#ifdef NOPEN_HAS_OPENCL
+#define CL_TARGET_OPENCL_VERSION 120
+#include <CL/cl.h>
+#endif
+
+#define MIB (1024u * 1024u)
+#define SEG_BYTES ((size_t)NOPEN_SEGMENT_MIB * MIB)
+#define MAX_SEGS (NOPEN_MAX_MIB/NOPEN_SEGMENT_MIB)
+struct nopen_store {
+    nopen_backend backend;
+    size_t count;
+    size_t operations, fail_at;
+    char error[256];
+    unsigned char *mock;
+#ifdef NOPEN_HAS_OPENCL
+    cl_context ctx;
+    cl_command_queue queue;
+    cl_mem segment[MAX_SEGS];
+    size_t seg_count;
+#endif
+};
+static int fail(nopen_store *s, const char *msg) {
+    snprintf(s->error,sizeof(s->error),"%s",msg);
+    return -1;
+}
+const char *nopen_store_last_error(const nopen_store *s) {return s ? s->error : "null store";}
+size_t nopen_store_page_count(const nopen_store *s) {return s?s->count:0;}
+void nopen_store_inject_failure(nopen_store *s,size_t n) {if(s) {s->operations=0;s->fail_at=n;}}
+void nopen_store_close(nopen_store *s) {
+    if(!s)return;
+#ifdef NOPEN_HAS_OPENCL
+    for(size_t i=0;i<s->seg_count;i++)if(s->segment[i])clReleaseMemObject(s->segment[i]);
+    if(s->queue)clReleaseCommandQueue(s->queue);
+    if(s->ctx)clReleaseContext(s->ctx);
+#endif
+    free(s->mock);free(s);
+}
+#ifdef NOPEN_HAS_OPENCL
+static int open_opencl(nopen_store *s,size_t bytes) {
+    cl_uint platform_count=0;
+    cl_int rc=clGetPlatformIDs(0,NULL,&platform_count);
+    if(rc!=CL_SUCCESS || platform_count==0)return fail(s,"no OpenCL platforms");
+    cl_platform_id *platforms=calloc(platform_count,sizeof(*platforms));
+    if(!platforms)return fail(s,"platform allocation failed");
+    rc=clGetPlatformIDs(platform_count,platforms,NULL);
+    if(rc!=CL_SUCCESS){free(platforms);return fail(s,"cannot enumerate OpenCL platforms");}
+    cl_device_id gpu=NULL;
+    cl_ulong global=0,max_alloc=0;
+    char gpu_name[128]={0},vendor[128]={0};
+    for(cl_uint p=0;p<platform_count&&!gpu;p++) {
+        cl_uint count=0;
+        if(clGetDeviceIDs(platforms[p],CL_DEVICE_TYPE_GPU,0,NULL,&count)!=CL_SUCCESS||!count)continue;
+        cl_device_id *ids=calloc(count,sizeof(*ids));
+        if(!ids){free(platforms);return fail(s,"device allocation failed");}
+        rc=clGetDeviceIDs(platforms[p],CL_DEVICE_TYPE_GPU,count,ids,NULL);
+        if(rc==CL_SUCCESS)for(cl_uint i=0;i<count;i++) {
+            cl_bool unified=CL_TRUE;
+            char v[128]={0};
+            clGetDeviceInfo(ids[i],CL_DEVICE_VENDOR,sizeof(v),v,NULL);
+            clGetDeviceInfo(ids[i],CL_DEVICE_HOST_UNIFIED_MEMORY,sizeof(unified),&unified,NULL);
+            if(!unified && (strstr(v,"Advanced Micro Devices")||strstr(v,"AMD"))) {
+                gpu=ids[i];snprintf(vendor,sizeof(vendor),"%s",v);
+                clGetDeviceInfo(gpu,CL_DEVICE_NAME,sizeof(gpu_name),gpu_name,NULL);
+                clGetDeviceInfo(gpu,CL_DEVICE_GLOBAL_MEM_SIZE,sizeof(global),&global,NULL);
+                clGetDeviceInfo(gpu,CL_DEVICE_MAX_MEM_ALLOC_SIZE,sizeof(max_alloc),&max_alloc,NULL);
+                break;
+            }
+        }
+        free(ids);
+    }
+    free(platforms);
+    if(!gpu)return fail(s,"no discrete AMD OpenCL GPU; refuses host RAM fallback");
+    /* Do not reserve over 75% of total VRAM. Leave at least 4 GiB on larger GPUs. */
+    if(bytes>(size_t)(global*3/4) || (global >= 8ull*1024*MIB && global-bytes<4ull*1024*MIB))
+        return fail(s,"VRAM reservation would leave insufficient GPU budget");
+    s->ctx=clCreateContext(NULL,1,&gpu,NULL,NULL,&rc);
+    if(rc!=CL_SUCCESS||!s->ctx)return fail(s,"clCreateContext failed");
+    s->queue=clCreateCommandQueue(s->ctx,gpu,CL_QUEUE_PROFILING_ENABLE,&rc);
+    if(rc!=CL_SUCCESS||!s->queue)return fail(s,"clCreateCommandQueue failed");
+    for(size_t off=0;off<bytes;off+=SEG_BYTES) {
+        size_t len=bytes-off<SEG_BYTES?bytes-off:SEG_BYTES;
+        if((cl_ulong)len>max_alloc)return fail(s,"segment exceeds max GPU allocation");
+        cl_mem m=clCreateBuffer(s->ctx,CL_MEM_READ_WRITE,len,NULL,&rc);
+        if(rc!=CL_SUCCESS||!m)return fail(s,"clCreateBuffer failed (insufficient GPU VRAM?)");
+        s->segment[s->seg_count++]=m;
+    }
+    fprintf(stderr,"Nopen v0.12 selected discrete GPU: %s (%s); segments=%zu, GPU reservation=%zu MiB\n",gpu_name,vendor,s->seg_count,bytes/MIB);
+    return 0;
+}
+#endif
+int nopen_store_open(nopen_store **out,nopen_backend backend,size_t mib) {
+    if(!out)return -1;
+    *out=NULL;
+    if(mib<1||mib>NOPEN_MAX_MIB|| (backend!=NOPEN_STORE_MOCK&&backend!=NOPEN_STORE_OPENCL))return -1;
+    size_t bytes=mib*MIB;
+    nopen_store *s=calloc(1,sizeof(*s));
+    if(!s)return -1;
+    s->backend=backend;s->count=bytes/NOPEN_PAGE_SIZE;
+    if(backend==NOPEN_STORE_MOCK) {
+        /* Fake storage is strictly opt-in for offline unit tests. */
+        s->mock=calloc(1,bytes);
+        if(!s->mock){nopen_store_close(s);return -1;}
+    } else {
+#ifdef NOPEN_HAS_OPENCL
+        if(open_opencl(s,bytes)!=0){fprintf(stderr,"OPENCL REFUSED: %s\n",s->error);nopen_store_close(s);return -1;}
+#else
+        fputs("OPENCL REFUSED: binary built without OpenCL; no RAM fallback\n",stderr);
+        nopen_store_close(s);return -1;
+#endif
+    }
+    *out=s;return 0;
+}
+static int io(nopen_store *s,size_t page,void *buf,int write_operation) {
+    if(!s||!buf||page>=s->count)return -1;
+    s->operations++;
+    if(s->fail_at && s->operations>=s->fail_at)return fail(s,"injected GPU I/O fault");
+    if(s->backend==NOPEN_STORE_MOCK) {
+        if(write_operation)memcpy(s->mock+page*NOPEN_PAGE_SIZE,buf,NOPEN_PAGE_SIZE);
+        else memcpy(buf,s->mock+page*NOPEN_PAGE_SIZE,NOPEN_PAGE_SIZE);
+        return 0;
+    }
+#ifdef NOPEN_HAS_OPENCL
+    size_t position=page*NOPEN_PAGE_SIZE;
+    cl_mem seg=s->segment[position/SEG_BYTES];
+    size_t offset=position%SEG_BYTES;
+    cl_int rc=write_operation
+        ?clEnqueueWriteBuffer(s->queue,seg,CL_TRUE,offset,NOPEN_PAGE_SIZE,buf,0,NULL,NULL)
+        :clEnqueueReadBuffer(s->queue,seg,CL_TRUE,offset,NOPEN_PAGE_SIZE,buf,0,NULL,NULL);
+    if(rc!=CL_SUCCESS) {
+        snprintf(s->error,sizeof(s->error),"OpenCL 4KiB %s failed rc=%d",write_operation?"write":"read",rc);
+        return -1;
+    }
+    return 0;
+#else
+    return fail(s,"OpenCL support missing");
+#endif
+}
+int nopen_store_write(nopen_store*s,size_t p,const void*data){return io(s,p,(void*)data,1);}
+int nopen_store_read(nopen_store*s,size_t p,void*data){return io(s,p,data,0);}
