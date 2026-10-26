@@ -1,3 +1,5 @@
+**Current experiment: v0.12.0-alpha.3 — bounded fault-driven application VRAM tier, NOT Linux SWAP.** Previous OpenCL+NBD global Linux swap remains unsafe. Real Linux swap requires safe kernel reclaim and GPU-reset recovery.
+
 # Research release chronology
 
 **Current experiment: v0.12.0-alpha.2 — bounded, process-local GPU-backed LRU page management.** NopenOS system SWAP remains the strategic target, not an existing product.

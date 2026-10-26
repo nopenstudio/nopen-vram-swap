@@ -1,3 +1,11 @@
+# Nopen VRAM-SWAP — v0.12.0-alpha.3
+
+**New milestone:** bounded userfaultfd missing-page handler with fault-recency eviction into discrete AMD OpenCL VRAM. The new `nopen-vram-demand` is a **single-process laboratory**, NOT global Linux swap, a kernel driver, or transparent Bannerlord RAM. The previous NBD swap experiments caused fatal system crashes. The real-swap target for future NopenOS remains conditional on forward-progress and recovery guarantees.
+
+[Alpha.3 guide](v012/README_ALPHA3_TR.md) · [Source](v012/src/nopen_fault_managed.c)
+
+---
+
 # Nopen VRAM-SWAP — v0.12.0-alpha.2
 
 **Research goal: real Linux SWAP on NopenOS. Current milestone: bounded, process-local VRAM memory tier — NOT system SWAP.**

@@ -1,3 +1,14 @@
+# v0.12.0-alpha.3 — bounded userfaultfd demand pager
+
+- New `nopen-vram-demand` integrates page-fault-driven restoration, resident-budget eviction, and discrete AMD OpenCL backing.
+- Deterministic single-thread application access contract. Eviction based on **fault recency**, not perfect LRU/dirty tracking.
+- Data hash checked before displacing a valid page; write success required before `MADV_DONTNEED`.
+- Injected mock read/write/corruption failure exits ONLY the test process with distinct exit codes; no system swap modified.
+- GitHub CI mock/UFFD, OpenCL build, sanitizer checks; RX 9060 XT hardware test pending.
+- Not a Linux swap solution yet. NopenOS kernel integration and GPU reset recovery remain research tasks.
+
+---
+
 # v0.12.0-alpha.2 — managed process-local VRAM tier
 
 - Added page table with ZERO, CPU-resident, and GPU-backed states.

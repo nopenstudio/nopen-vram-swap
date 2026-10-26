@@ -1,0 +1,50 @@
+name: v0.12 alpha.3 bounded UFFD GPU page cache (no system swap)
+on:
+  push:
+    branches: ["develop/v0.12.0-alpha.3"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mock-uffd-integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Release with mock-only storage
+        run: |
+          cmake -S v012 -B build-mock -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-mock --parallel
+          ctest --test-dir build-mock --output-on-failure -V
+      - name: Require userfaultfd to run the demand-integration test
+        run: |
+          ./build-mock/nopen-vram-demand --probe
+          bash v012/tests/test_demand.sh ./build-mock/nopen-vram-demand
+      - name: Security assertion (must never open global SWAP)
+        run: |
+          ! grep -ERn 'system\(".*swapon|NBD_SET_SOCK|NBD_DO_IT|/dev/nbd15' v012/src/nopen_fault_managed.c
+  compile-opencl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenCL headers and ICD
+        run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev opencl-headers
+      - name: Compile OpenCL backend + execute CPU-side tests
+        run: |
+          cmake -S v012 -B build-opencl -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+          cmake --build build-opencl --parallel
+          ctest --test-dir build-opencl --output-on-failure
+          ./build-opencl/nopen-vram-demand --help
+  sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile ASan/UBSan mock-only
+        run: |
+          cmake -S v012 -B build-asan -DCMAKE_BUILD_TYPE=Debug -DNOPEN_OPENCL=OFF \
+            -DCMAKE_C_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' \
+            -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+          cmake --build build-asan --parallel
+      - name: Run memory safety tests (with UFFD if available)
+        run: |
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 \
+            ctest --test-dir build-asan --output-on-failure

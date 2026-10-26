@@ -33,3 +33,10 @@ add_executable(nopen-vram-test-memory tests/test_memory.c)
 target_link_libraries(nopen-vram-test-memory PRIVATE nopen_vram_memory)
 add_test(NAME managed_lru_pageout_pagein_checksum_atomicity COMMAND nopen-vram-test-memory)
 add_test(NAME managed_cooperative_mock_cli COMMAND nopen-vram-managed --backend mock --pool-mib 4 --logical-pages 128 --ram-pages 8 --rounds 2)
+
+# alpha.3: bounded process-only UFFD pager using actual GPU store.
+add_executable(nopen-vram-demand src/nopen_fault_managed.c)
+target_link_libraries(nopen-vram-demand PRIVATE nopen_vram_store pthread)
+add_test(NAME demand_uffd_mock_and_fault_isolation
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_demand.sh $<TARGET_FILE:nopen-vram-demand>)
+set_tests_properties(demand_uffd_mock_and_fault_isolation PROPERTIES TIMEOUT 40)

@@ -1,3 +1,11 @@
+# Nopen VRAM-SWAP — v0.12.0-alpha.3
+
+**Yeni deney:** `userfaultfd` sayfa hataları ile GPU-backed, RAM kotası sınırlı sayfa havuzu birleştirildi. RX 9060 XT üzerinde henüz alfa.3 çalıştırılmadı. Eski OpenCL+NBD sistem SWAP'i **GÜVENLİ DEĞİL** ve kullanılmamalı. Gerçek Linux SWAP, NopenOS için sonraki çekirdek entegrasyon hedefidir; alpha.3 hâlâ **yalnızca deney uygulaması** içindir.
+
+[Alpha.3 Türkçe test rehberi](v012/README_ALPHA3_TR.md) · `nopen-vram-demand` yeni örnek program; daha eski testler korunuyor.
+
+---
+
 # Nopen VRAM-SWAP v0.12.0-alpha.2
 
 **Nihai hedef değişmedi: NopenOS'ta gerçek Linux takası.** Şu anda yalnızca uygulama kapsamındaki RAM/GPU sayfa yöneticisini geliştiriyoruz. Daha önceki OpenCL+NBD deneyleri kernel panic'e yol açtığından global SWAP yolu kapalı kalacak.

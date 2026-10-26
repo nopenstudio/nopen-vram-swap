@@ -1,3 +1,7 @@
+> **v0.12.0-alpha.3:** Yeni `nopen-vram-demand`, bellek sayfasına doğrudan erişimde `userfaultfd` ile hata yakalayarak resident sayfa kotası dolunca VRAM'e sayfa çıkarır. [Kurulum ve gerçek GPU testi](README_ALPHA3_TR.md). Alpha.2 yönetilen sayfa API'si bu dalda da korunur.
+
+---
+
 # Nopen VRAM-SWAP v0.12.0-alpha.2 — yönetilen GPU sayfa havuzu
 
 **Nihai hedef gerçek Linux SWAP'tir; bu sürüm henüz sistem SWAP'i değildir.** 26 Ekim kernel panic'ine yol açan NBD servisi bilerek kullanılmaz. Yeni program, kendi yönettiği bellek bölgesi için sınırlandırılmış RAM sayfalarını GPU belleğiyle değiştirir.
