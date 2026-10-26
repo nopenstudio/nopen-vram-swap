@@ -152,6 +152,9 @@ case "$ACTION" in
     out="$WORK/nopen-bannerlord-8g-report-${stamp}.tar.gz"
     sudo journalctl -u nopen-vram-v093.service -b --no-pager > "$LOGS/backend-journal.txt" || true
     sudo journalctl -k -b --no-pager > "$LOGS/kernel-journal.txt" || true
+    sudo journalctl --list-boots --no-pager > "$LOGS/journal-boots.txt" || true
+    sudo journalctl -u nopen-vram-v093.service -b -1 --no-pager > "$LOGS/backend-previous-boot.txt" || true
+    sudo journalctl -k -b -1 --no-pager > "$LOGS/kernel-previous-boot.txt" || true
     sudo cp /var/log/nopen-vram-nbd-v093.log "$LOGS/backend-events.log" 2>/dev/null || true
     sudo cp /var/log/nopen-vram-nbd-v093-telemetry.log "$LOGS/telemetry.log" 2>/dev/null || true
     sudo chown "$(id -u):$(id -g)" "$LOGS"/* 2>/dev/null || true
