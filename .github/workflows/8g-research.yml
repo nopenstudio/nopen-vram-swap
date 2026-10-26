@@ -1,0 +1,24 @@
+name: Experimental 8GiB NBD profile source verification
+on:
+  push:
+    branches: ["experiments/8g-real-swap"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y build-essential opencl-headers ocl-icd-opencl-dev python3 unzip
+      - name: Generate patched source from archived 2 GiB code
+        run: python3 experiments/real-swap-8g/build-profile.py --archive legacy/archives/Nopen_VRAM_NBD_v0.9.3_NBD_Stall_Diagnostics.zip --output /tmp/nopen-8g-backend
+      - name: Compile and run host-only regression tests (NO NBD / NO SWAP)
+        run: |
+          make -C /tmp/nopen-8g-backend -j2
+          make -C /tmp/nopen-8g-backend test
+          bash -n experiments/real-swap-8g/real-swap-8g.sh
+          bash -n /tmp/nopen-8g-backend/start-v093.sh
+          bash -n /tmp/nopen-8g-backend/enable-v093.sh
+          bash -n /tmp/nopen-8g-backend/disable-v093.sh
