@@ -1,0 +1,1 @@
+See `../../README_TR.md` for full setup, diagnostics, and three test stages.

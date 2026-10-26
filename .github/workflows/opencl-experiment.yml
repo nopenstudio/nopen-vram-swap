@@ -1,0 +1,18 @@
+name: OpenCL research benchmark build
+on:
+  push:
+    branches: ['experiments/opencl-benchmark']
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Khronos OpenCL headers + ICD loader
+        run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev
+      - name: Configure
+        run: cmake -S experiments/opencl-benchmark -B build-opencl -DCMAKE_BUILD_TYPE=Release
+      - name: Build with actual OpenCL headers
+        run: cmake --build build-opencl --parallel
+      - name: CLI tests (GPU not required)
+        run: ctest --test-dir build-opencl --output-on-failure
