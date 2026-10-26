@@ -24,3 +24,8 @@ jobs:
           make -C /tmp/nopen-8g-compiled test
           grep -q 'mb != 8192' /tmp/nopen-8g-compiled/nopen-vram-nbd.c
           grep -q 'NBD_SET_SIZE_BLOCKS' /tmp/nopen-8g-compiled/nopen-vram-nbd.c
+          for script in start-v093.sh enable-v093.sh disable-v093.sh monitor-v093.sh \
+                        doctor-v093.sh focus-probe-v093.sh run-isolated-cycle.sh \
+                        collect-after-reboot.sh; do
+            test -x "/tmp/nopen-8g-compiled/$script"
+          done
