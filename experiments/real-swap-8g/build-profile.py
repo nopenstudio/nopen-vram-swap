@@ -98,6 +98,17 @@ def extract_archive(archive,destination):
             raise RuntimeError('Archive missing expected v0.9.3 folder')
         apply_patches(root)
         shutil.copytree(root,destination,copy_function=shutil.copy2)
+        # Python ZipFile.extractall does not preserve Unix executable bits.
+        # Restore only the scripts explicitly marked executable in the trusted
+        # versioned archive; otherwise start/enable/disable fail with EACCES.
+        for member in z.infolist():
+            relative = pathlib.PurePosixPath(member.filename)
+            if len(relative.parts) != 2 or relative.parts[0] != 'Nopen_VRAM_NBD_v0.9.3':
+                continue
+            if (member.external_attr >> 16) & 0o111:
+                dst = destination / relative.name
+                if dst.is_file() and not dst.is_symlink():
+                    dst.chmod(0o755)
     print(f'CREATED 8 GiB profile: {destination}\nNO SWAP ENABLED; no kernel settings changed.')
 
 
