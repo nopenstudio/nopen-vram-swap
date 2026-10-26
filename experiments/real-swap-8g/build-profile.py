@@ -27,6 +27,16 @@ PATCHES = {
          'if(crash_log_fd>=0) { diagnostic_n = write(crash_log_fd,msg,n); (void)diagnostic_n; }'),
         ('if (crash_log_fd >= 0) (void)write(crash_log_fd, msg, (size_t)n);',
          'if (crash_log_fd >= 0) { ssize_t event_n = write(crash_log_fd, msg, (size_t)n); (void)event_n; }'),
+        # No synchronous filesystem logging in the successful NBD request path.
+        # Under sustained reclaim a Btrfs O_DSYNC may block the only swap
+        # responder; monitoring belongs off the critical I/O thread.
+        ('O_APPEND|O_CLOEXEC|O_NOFOLLOW|O_DSYNC,0600',
+         'O_APPEND|O_CLOEXEC|O_NOFOLLOW,0600'),
+        ('            log_event("heartbeat_reads", stats.reads);\n'
+         '            log_event("heartbeat_writes", stats.writes);\n'
+         '            log_event("heartbeat_errors", stats.errors);',
+         '            /* Periodic heartbeat file I/O removed from NBD serve().\n'
+         '             * Use monitor-v093.sh and /sys/block/nbd15/stat instead. */'),
     ],
     'start-v093.sh': [
         ('The 2 GiB GPU reservation', 'The 8 GiB GPU reservation'),
@@ -74,6 +84,12 @@ def apply_patches(folder):
     assert 'pre_gpu_vram_free' in code and 'NBD_SET_TIMEOUT, 60ul' in code
     assert 'NBD_SET_SIZE_BLOCKS' in code
     assert 'NBD_SET_SOCK' in code
+    # Static no-synchronous-log contract. Only the exceptional diagnostics
+    # may still write to file; eliminating that is a separate architecture task.
+    assert 'O_DSYNC' not in code
+    assert 'log_event("heartbeat_reads"' not in code
+    assert 'log_event("heartbeat_writes"' not in code
+    assert 'log_event("heartbeat_errors"' not in code
     en=(folder/'enable-v093.sh').read_text()
     assert '8589934592' in en and 'EVET SIGBUS RISKI' in en and 'swapon -p 200' in en
     start=(folder/'start-v093.sh').read_text()
