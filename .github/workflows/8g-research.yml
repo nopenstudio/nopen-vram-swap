@@ -19,6 +19,8 @@ jobs:
           make -C /tmp/nopen-8g-backend -j2
           make -C /tmp/nopen-8g-backend test
           bash -n experiments/real-swap-8g/real-swap-8g.sh
+          grep -q 'nbd-no-sync-kde-experiment' experiments/real-swap-8g/real-swap-8g.sh
+          grep -q 'REFUSED: prepared backend contains legacy' experiments/real-swap-8g/real-swap-8g.sh
           bash -n /tmp/nopen-8g-backend/start-v093.sh
           bash -n /tmp/nopen-8g-backend/enable-v093.sh
           bash -n /tmp/nopen-8g-backend/disable-v093.sh
