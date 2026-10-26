@@ -20,6 +20,16 @@ for BOOT in -1 0; do
     --grep='SIGBUS|segfault|coredump|nbd15|GPU reset|amdgpu|oom|swap-device|Sway|sway' \
     > "$DIR/events-boot${BOOT}.log" 2>&1 || true
 done
+# Historical window covers the earlier v0.9.3 world-loading incident even if
+# more than one reboot has happened since. Only retained journald entries appear.
+HIST_START="2026-10-25 18:00:00"
+HIST_END="2026-10-26 12:00:00"
+jread --since "$HIST_START" --until "$HIST_END" -k -o short-iso --no-pager \
+  > "$DIR/kernel-historical-oct25.log" 2>&1 || true
+jread --since "$HIST_START" --until "$HIST_END" -o short-iso --no-pager \
+  -u nopen-vram-v093.service -u nopen-vram-v093-monitor.service \
+  -u nopen-vram-v092.service -u nopen-vram-v092-monitor.service \
+  > "$DIR/nopen-historical-oct25.log" 2>&1 || true
 for f in /var/log/nopen-vram-nbd-v092.log /var/log/nopen-vram-nbd-v093.log; do
   if [[ -r "$f" ]]; then cp "$f" "$DIR/$(basename "$f")"; fi
 done
