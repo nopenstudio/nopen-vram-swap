@@ -22,6 +22,9 @@ jobs:
           bash -n /tmp/nopen-8g-backend/start-v093.sh
           bash -n /tmp/nopen-8g-backend/enable-v093.sh
           bash -n /tmp/nopen-8g-backend/disable-v093.sh
+          test -x /tmp/nopen-8g-backend/start-v093.sh
+          test -x /tmp/nopen-8g-backend/enable-v093.sh
+          test -x /tmp/nopen-8g-backend/disable-v093.sh
       - name: Verify 8 GiB OpenCL benchmark builds (NO GPU / NO SWAP)
         run: |
           cmake -S experiments/opencl-benchmark -B /tmp/nopen-opencl-8g -DCMAKE_BUILD_TYPE=Release
