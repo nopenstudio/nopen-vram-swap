@@ -18,3 +18,7 @@ target_link_libraries(nopen-vram-test-store PRIVATE nopen_vram_store)
 enable_testing()
 add_test(NAME mock_store_integrity_bounds_injection COMMAND nopen-vram-test-store)
 add_test(NAME forbidden_nbd_options COMMAND nopen-vram-lab --self-audit)
+
+add_test(NAME isolated_gpu_pagein_failure_terminates_only_lab
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fault_isolation.sh $<TARGET_FILE:nopen-vram-lab>)
+set_tests_properties(isolated_gpu_pagein_failure_terminates_only_lab PROPERTIES TIMEOUT 15)

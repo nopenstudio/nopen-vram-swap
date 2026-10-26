@@ -166,13 +166,13 @@ static void usage(void) {
     puts("  --self-audit                     Display non-destructive architecture controls");
     puts("  --probe                          Check unprivileged userfaultfd only");
     puts("  --demo --backend mock|opencl     Userfaultfd page-in + cooperative GPU eviction");
-    puts("          [--mib 64] [--pages 256] [--rounds 3]");
+    puts("          [--mib 64] [--pages 256] [--rounds 3] [--inject-on-pagein (mock only)]");
     puts("  --raw --backend mock|opencl      Direct 4KiB put/get without userfaultfd");
     puts("          [--mib 64] [--pages 256] [--rounds 3]");
     puts("  OpenCL backend refuses missing discrete AMD GPU. No fallback. NO NBD/SWAPON.");
 }
 int main(int argc,char **argv) {
-    int demo=0,raw=0,probe=0,audit=0;
+    int demo=0,raw=0,probe=0,audit=0,inject_on_pagein=0;
     nopen_backend backend=NOPEN_STORE_MOCK;
     size_t mib=64,sample_pages=256,rounds=3;
     for(int i=1;i<argc;i++) {
@@ -181,6 +181,7 @@ int main(int argc,char **argv) {
         else if(strcmp(arg,"--raw")==0)raw=1;
         else if(strcmp(arg,"--probe")==0)probe=1;
         else if(strcmp(arg,"--self-audit")==0)audit=1;
+        else if(strcmp(arg,"--inject-on-pagein")==0)inject_on_pagein=1;
         else if(strcmp(arg,"--help")==0||strcmp(arg,"-h")==0){usage();return 0;}
         else if(strcmp(arg,"--backend")==0&&i+1<argc) {
             const char *v=argv[++i];
@@ -203,7 +204,7 @@ int main(int argc,char **argv) {
         if(fd<0){fprintf(stderr,"UFFD_UNAVAILABLE errno=%d (%s): %s\n",errno,strerror(errno),UFFD_FAIL);return 3;}
         close(fd);puts("UFFD_AVAILABLE: user-mode-only page faults supported (no swap enabled)");return 0;
     }
-    if((demo+raw)!=1 || !mib||mib>NOPEN_MAX_MIB||!rounds||rounds>20||!sample_pages||sample_pages>MAX_TEST_PAGES||sample_pages>mib*MIB/NOPEN_PAGE_SIZE) {
+    if((demo+raw)!=1 || (inject_on_pagein && (!demo || backend!=NOPEN_STORE_MOCK)) || !mib||mib>NOPEN_MAX_MIB||!rounds||rounds>20||!sample_pages||sample_pages>MAX_TEST_PAGES||sample_pages>mib*MIB/NOPEN_PAGE_SIZE) {
         usage();return 2;
     }
     if(unsafe_existing_swap())return 4;
@@ -231,6 +232,10 @@ int main(int argc,char **argv) {
             } else {
                 if(nopen_store_write(s,index,reference)!=0){fputs("FAIL: raw store write\n",stderr);goto failure;}
             }
+        }
+        if(inject_on_pagein && round==0) {
+            fputs("INJECTED: next mock GPU page-in read will fail; only this process may terminate.\n",stderr);
+            nopen_store_inject_failure(s,1);
         }
         for(size_t i=sample_pages;i>0;) {
             i--;size_t index=i*step;
