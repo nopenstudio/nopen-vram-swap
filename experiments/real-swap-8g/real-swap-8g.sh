@@ -51,7 +51,16 @@ case "$ACTION" in
       python3 "$HERE/build-profile.py" --archive "$ARCHIVE" --output "$SRC"
     fi
     [[ -f "$SRC/NOPEN_8G_PROFILE.txt" ]] || { echo 'Bad profile; refuse.' >&2; exit 2; }
+    # Repair previously extracted profiles as well as fresh builds:
+    # Python zipfile extraction can discard shell script executable bits.
+    for exe in start-v093.sh enable-v093.sh disable-v093.sh; do
+      [[ -f "$SRC/$exe" && ! -L "$SRC/$exe" ]] || { echo "Invalid $exe; refuse." >&2; exit 2; }
+      chmod 0755 "$SRC/$exe"
+    done
     (cd "$SRC" && make clean && make -j2 && make test)
+    for exe in start-v093.sh enable-v093.sh disable-v093.sh; do
+      [[ -x "$SRC/$exe" ]] || { echo "Script still not executable: $exe" >&2; exit 2; }
+    done
     echo 'PREPARED: 8 GiB code compiled and tests passed. NO real swap enabled.'
     ;;
   start)
