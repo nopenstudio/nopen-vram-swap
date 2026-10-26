@@ -1,22 +1,14 @@
-# Historical releases (OpenCL era)
+# Research release chronology
 
-OpenCL was removed from the active build in **v0.10.0-alpha.1**. Historical packages are retained **for reproducibility only**; the OpenCL code is not part of the current backend.
+**Current active experiment: v0.12.0-alpha.1 — Nopen Memory Fabric Lab.** Cooperative application-level GPU-backed 4 KiB pages using user-only `userfaultfd` and OpenCL. **No NBD, no Linux SWAP, no game-transparent RAM extension.**
 
-| Family | Scope | Historical state |
+Historical Vulkan v0.10 probe remains in `src/`. Earlier OpenCL+NBD system swap experiments are explicitly **unsafe** after the 2026-10-26 Bannerlord/PID1 crash.
+
+| Family | Scope | Status |
 |---|---|---|
-| Alpha / beta 0.2 | Early 128 MiB NBD raw block prototype | raw blocks only |
-| beta 0.3 | 8 GiB segmented OpenCL storage | raw blocks only |
-| beta 0.4 | Distributed raw block verification | raw blocks only |
-| beta 0.5 | First experimental active SWAP | serious SIGBUS and crash |
-| beta 0.6 | Crash diagnostics; disabled swap | raw blocks only |
-| beta 0.7 | 2 GiB configurable VRAM and canary support | experimental |
-| beta 0.8 | Random 4 KiB diagnostics; swap disabled | raw blocks only |
-| beta 0.9 | Real SWAP; 1.26 GiB recorded use | system freeze |
-| beta 0.9.1 and 0.9.1a | Real page-out; investigated swap cache | swap-in not yet proven |
-| beta 0.9.2 | Verified swap-in (~1,473 MiB physical NBD reads) | NBD stall, SIGBUS, desktop crash |
-| beta 0.9.3 | NBD nonblocking send and diagnostic phases | Bannerlord world-load freeze reported |
-| **v0.10.0-alpha.1** | **Vulkan mapped-memory probe** | **no swap, no NBD** |
+| v0.9.2 and v0.9.3 | OpenCL + NBD real Linux swap | **UNSAFE**: NBD stalls, SIGBUS, PID1 panic |
+| v0.10.0-alpha.1 | Vulkan mapped VRAM probe | Archived research; no swap |
+| v0.10.0-alpha.2 | OpenCL PCIe DMA benchmark on experimental branch | 8 GiB full verify on RX 9060 XT, no swap |
+| **v0.12.0-alpha.1** | **OpenCL GPU store + cooperative UFFD page lab** | **Mock/unit build passed; Garuda GPU+UFFD integration unverified** |
 
-**Do not enable historical SWAP scripts on a machine with important work.** Unreliable userspace NBD can invalidate live swap pages, cause system-wide SIGBUS, or lose work.
-
-Historical source archive ZIPs are part of the separately downloadable full project bundle under `legacy/archives/`, where available. Source owners retain responsibility for licensing and redistribution of historical third-party materials.
+See [new architecture](../v012/docs/ARCHITECTURE_TR.md) and [version notes](../v012/CHANGELOG.md). The older `legacy/archives/` packages are kept for historical research only. Do not enable old swap services.
