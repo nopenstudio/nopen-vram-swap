@@ -51,6 +51,13 @@ case "$ACTION" in
       python3 "$HERE/build-profile.py" --archive "$ARCHIVE" --output "$SRC"
     fi
     [[ -f "$SRC/NOPEN_8G_PROFILE.txt" ]] || { echo 'Bad profile; refuse.' >&2; exit 2; }
+    # Heal profiles created by the initial build script, which lost ZIP execute bits.
+    for script in start-v093.sh enable-v093.sh disable-v093.sh monitor-v093.sh \
+                  doctor-v093.sh focus-probe-v093.sh run-isolated-cycle.sh \
+                  collect-after-reboot.sh; do
+      [[ -f "$SRC/$script" ]] || { echo "Missing backend script: $script" >&2; exit 2; }
+      chmod 755 "$SRC/$script"
+    done
     (cd "$SRC" && make clean && make -j2 && make test)
     echo 'PREPARED: 8 GiB code compiled and tests passed. NO real swap enabled.'
     ;;
