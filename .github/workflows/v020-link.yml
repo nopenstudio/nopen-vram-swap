@@ -15,6 +15,11 @@ jobs:
           cmake -S v020 -B build-020-mock -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
           cmake --build build-020-mock --parallel
           ctest --test-dir build-020-mock --output-on-failure
+      - name: Legacy pager and new batched store regressions
+        run: |
+          cmake -S v012 -B build-012-regression -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-012-regression --parallel
+          ctest --test-dir build-012-regression --output-on-failure
       - name: Invalid inputs and GPU no-fallback
         run: |
           ! ./build-020-mock/nopen-link-bench --pool-mib 4
