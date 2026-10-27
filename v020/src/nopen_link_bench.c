@@ -100,7 +100,8 @@ static int open_amd(gpu *g,size_t bytes) {
     return 0;
 }
 #endif
-static int transfer(gpu *g,int mock,int to_gpu,unsigned char *host,size_t bytes,size_t chunk) {
+static int transfer(gpu *g,int mock,int to_gpu,unsigned char *host,size_t bytes,size_t chunk,int blocking) {
+    (void)blocking;
     for(size_t offset=0;offset<bytes;offset+=chunk) {
         if(mock) {
             if(to_gpu) memcpy(g->mock+offset,host+offset,chunk);
@@ -108,8 +109,8 @@ static int transfer(gpu *g,int mock,int to_gpu,unsigned char *host,size_t bytes,
         } else {
 #ifdef NOPEN_OPENCL
             cl_int rc=to_gpu ?
-                clEnqueueWriteBuffer(g->queue,g->mem,CL_FALSE,offset,chunk,host+offset,0,NULL,NULL) :
-                clEnqueueReadBuffer(g->queue,g->mem,CL_FALSE,offset,chunk,host+offset,0,NULL,NULL);
+                clEnqueueWriteBuffer(g->queue,g->mem,blocking?CL_TRUE:CL_FALSE,offset,chunk,host+offset,0,NULL,NULL) :
+                clEnqueueReadBuffer(g->queue,g->mem,blocking?CL_TRUE:CL_FALSE,offset,chunk,host+offset,0,NULL,NULL);
             if(rc!=CL_SUCCESS) {fprintf(stderr,"TRANSFER_FAILED rc=%d offset=%zu\n",rc,offset);return -1;}
 #else
             (void)g;(void)to_gpu;(void)host;(void)bytes;(void)chunk;
@@ -132,8 +133,10 @@ static void pattern(unsigned char *p,size_t n) {
     }
 }
 int main(int argc,char **argv) {
-    int mock=-1; size_t mib=64,kib=256,passes=3;
+    int mock=-1,blocking=0,inject=0; size_t mib=64,kib=256,passes=3;
     for(int i=1;i<argc;i++) {
+        if(!strcmp(argv[i],"--blocking")) {blocking=1;continue;}
+        if(!strcmp(argv[i],"--inject-corruption")) {inject=1;continue;}
         if(!strcmp(argv[i],"--help")) {
             puts("Nopen v0.2.0-dev: --backend mock|opencl --pool-mib 4..256 --chunk-kib 4|16|64|256|1024|4096 --passes 1..10");
             return 0;
@@ -152,7 +155,7 @@ int main(int argc,char **argv) {
             if(!dest || number(val,dest)) return 2;
         }
     }
-    if(mock<0 || mib<4 || mib>256 || passes>10 ||
+    if(mock<0 || (inject && mock!=1) || mib<4 || mib>256 || passes>10 ||
        !(kib==4 || kib==16 || kib==64 || kib==256 || kib==1024 || kib==4096) ||
        kib*1024u>mib*MIB) return 2;
     if(unsafe_swap()) {fputs("REFUSED active NBD or unreadable /proc/swaps\n",stderr);return 3;}
@@ -171,14 +174,15 @@ int main(int argc,char **argv) {
 #endif
     }
     if(rc) goto done;
-    if(transfer(&g,mock,1,tx,bytes,chunk) ||
-       transfer(&g,mock,0,rx,bytes,chunk) || memcmp(tx,rx,bytes)) {rc=6;goto done;}
+    if(transfer(&g,mock,1,tx,bytes,chunk,blocking)) {rc=6;goto done;}
+    if(inject) g.mock[bytes/2]^=0x40u;
+    if(transfer(&g,mock,0,rx,bytes,chunk,blocking) || memcmp(tx,rx,bytes)) {rc=6;goto done;}
     double write_s=0,read_s=0;
     for(size_t pass=0;pass<passes;pass++) {
         double a=clock_sec();
-        if(a<0 || transfer(&g,mock,1,tx,bytes,chunk)) {rc=6;goto done;}
+        if(a<0 || transfer(&g,mock,1,tx,bytes,chunk,blocking)) {rc=6;goto done;}
         double b=clock_sec();
-        if(b<=a || transfer(&g,mock,0,rx,bytes,chunk)) {rc=6;goto done;}
+        if(b<=a || transfer(&g,mock,0,rx,bytes,chunk,blocking)) {rc=6;goto done;}
         double c=clock_sec();
         if(c<=b || memcmp(tx,rx,bytes)) {rc=6;goto done;}
         write_s+=b-a;read_s+=c-b;
@@ -187,8 +191,8 @@ int main(int argc,char **argv) {
     if(getrusage(RUSAGE_SELF,&usage)) {rc=6;goto done;}
     printf("LINK_RESULT version=0.2.0-dev backend=%s pool_mib=%zu chunk_kib=%zu passes=%zu "
            "h2d_mib_s=%.2f d2h_mib_s=%.2f process_maxrss_kib=%ld "
-           "bulk_only=YES no_global_swap=YES\n",mock?"mock":"opencl",mib,kib,passes,
-           (double)(mib*passes)/write_s,(double)(mib*passes)/read_s,usage.ru_maxrss);
+           "bulk_only=YES no_global_swap=YES mode=%s\n",mock?"mock":"opencl",mib,kib,passes,
+           (double)(mib*passes)/write_s,(double)(mib*passes)/read_s,usage.ru_maxrss,blocking?"blocking":"queued");
     printf("BENCH_PASS backend=%s verified_bytes=%zu passes=%zu no_global_swap=YES\n",
            mock?"mock":"opencl",bytes,passes);
 done:
