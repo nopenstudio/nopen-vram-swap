@@ -1,0 +1,55 @@
+name: v0.4.0 RAM economics and bulk GPU import (no global swap)
+on:
+  push:
+    branches: ["develop/v0.4.0"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mock-regressions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build full v012 v030 and v040 mock tests
+        run: |
+          cmake -S v040 -B build-v040-mock -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-v040-mock --parallel
+          ctest --test-dir build-v040-mock --output-on-failure
+      - name: Compare equivalent CPU and mock GPU work without claiming net savings
+        run: |
+          python3 v040/tools/compare_economics.py \
+            --binary build-v040-mock/nopen-economics \
+            --backend mock --logical-mib 4 --ram-pages 32 --prefetch-pages 16
+      - name: Reject implicit GPU fallback and unsafe capacity
+        run: |
+          ! ./build-v040-mock/nopen-economics --backend opencl --logical-mib 4
+          ! ./build-v040-mock/nopen-economics --backend mock --logical-mib 2048
+          ! ./build-v040-mock/nopen-economics --backend mock --logical-mib 4 --ram-pages 1
+      - name: Pure C11 policy stays freestanding
+        run: |
+          gcc -std=c11 -ffreestanding -fno-builtin -Wall -Wextra -Werror \
+            -I v012/include -c v012/src/nopen_page_core.c -o /tmp/nopen-core-v040.o
+          test -z "$(nm -u /tmp/nopen-core-v040.o)"
+  opencl-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenCL headers and loader (not physical GPU)
+        run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev opencl-headers
+      - name: Compile real backend and run inherited mock tests
+        run: |
+          cmake -S v040 -B build-v040-opencl -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+          cmake --build build-v040-opencl --parallel
+          ctest --test-dir build-v040-opencl --output-on-failure
+  sanitizer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ASan UBSan for all inherited and new pager code
+        run: |
+          cmake -S v040 -B build-v040-san -DCMAKE_BUILD_TYPE=Debug -DNOPEN_OPENCL=OFF \
+            -DCMAKE_C_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' \
+            -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+          cmake --build build-v040-san --parallel
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 \
+            ctest --test-dir build-v040-san --output-on-failure
