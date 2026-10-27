@@ -20,6 +20,16 @@ jobs:
           cmake -S v012 -B build-012-regression -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
           cmake --build build-012-regression --parallel
           ctest --test-dir build-012-regression --output-on-failure
+      - name: Blocking mode and corruption rejection
+        run: |
+          ./build-020-mock/nopen-link-bench --backend mock --pool-mib 4 --chunk-kib 4 --passes 1 --blocking | grep 'mode=blocking'
+          set +e
+          ./build-020-mock/nopen-link-bench --backend mock --pool-mib 4 --passes 1 --inject-corruption > /tmp/nopen-corruption.log 2>&1
+          CODE=$?
+          set -e
+          test "$CODE" -eq 6
+          grep -q 'BENCH_FAILED code=6' /tmp/nopen-corruption.log
+          ! grep -q 'BENCH_PASS' /tmp/nopen-corruption.log
       - name: Invalid inputs and GPU no-fallback
         run: |
           ! ./build-020-mock/nopen-link-bench --pool-mib 4
