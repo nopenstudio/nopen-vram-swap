@@ -257,7 +257,8 @@ int nopen_memory_import_pages(nopen_memory *m, size_t first, const void *src,
         meta->state=PAGE_GPU;
         m->stats.zero_pages--;
         m->stats.vram_pages++;
-        m->stats.page_outs++;
+        m->stats.bulk_import_pages++;
     }
+    m->stats.bulk_import_batches++;
     return 0;
 }
