@@ -19,6 +19,7 @@ typedef struct {
     /* v0.3: demand reads and measured prefetch value/waste, not hypothetical hits. */
     uint64_t prefetch_batches, prefetch_pages, prefetch_hits;
     uint64_t prefetch_wasted, prefetch_failures, demand_page_ins;
+    uint64_t bulk_import_batches, bulk_import_pages;
 } nopen_memory_stats;
 
 /* logical_pages <= preallocated VRAM-store page_count; 0 < resident_slots <= logical_pages.
