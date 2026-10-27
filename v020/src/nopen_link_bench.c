@@ -37,7 +37,7 @@ static int unsafe_swap(void) {
     FILE *f=fopen("/proc/swaps","r");
     if(!f) return 1;
     char line[512]; int bad=0;
-    (void)fgets(line,sizeof line,f);
+    if (!fgets(line,sizeof line,f)) { fclose(f); return 1; }
     while(fgets(line,sizeof line,f)) {
         char name[256]={0};
         if(sscanf(line,"%255s",name)==1 && strncmp(name,"/dev/nbd",8)==0) bad=1;
