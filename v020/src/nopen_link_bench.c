@@ -135,12 +135,12 @@ static void pattern(unsigned char *p,size_t n) {
     }
 }
 int main(int argc,char **argv) {
-    int mock=-1,blocking=0,inject=0; size_t mib=64,kib=256,passes=3;
+    int mock=-1,blocking=0,inject=0; size_t mib=64,kib=256,passes=3,hold_ms=0;
     for(int i=1;i<argc;i++) {
         if(!strcmp(argv[i],"--blocking")) {blocking=1;continue;}
         if(!strcmp(argv[i],"--inject-corruption")) {inject=1;continue;}
         if(!strcmp(argv[i],"--help")) {
-            puts("Nopen v0.2.0-dev: --backend mock|opencl --pool-mib 4..256 --chunk-kib 4|16|64|256|1024|4096 --passes 1..10");
+            puts("Nopen v0.2.0-dev: --backend mock|opencl --pool-mib 4..256 --chunk-kib 4|16|64|256|1024|4096 --passes 1..10 [--hold-ms 1..3000]");
             return 0;
         }
         if(i+1>=argc) return 2;
@@ -154,10 +154,11 @@ int main(int argc,char **argv) {
             if(!strcmp(key,"--pool-mib")) dest=&mib;
             if(!strcmp(key,"--chunk-kib")) dest=&kib;
             if(!strcmp(key,"--passes")) dest=&passes;
+            if(!strcmp(key,"--hold-ms")) dest=&hold_ms;
             if(!dest || number(val,dest)) return 2;
         }
     }
-    if(mock<0 || (inject && mock!=1) || mib<4 || mib>256 || passes>10 ||
+    if(mock<0 || (inject && mock!=1) || mib<4 || mib>256 || passes>10 || hold_ms>3000 ||
        !(kib==4 || kib==16 || kib==64 || kib==256 || kib==1024 || kib==4096) ||
        kib*1024u>mib*MIB) return 2;
     if(unsafe_swap()) {fputs("REFUSED active NBD or unreadable /proc/swaps\n",stderr);return 3;}
@@ -179,6 +180,18 @@ int main(int argc,char **argv) {
     if(transfer(&g,mock,1,tx,bytes,chunk,blocking)) {rc=6;goto done;}
     if(inject) g.mock[bytes/2]^=0x40u;
     if(transfer(&g,mock,0,rx,bytes,chunk,blocking) || memcmp(tx,rx,bytes)) {rc=6;goto done;}
+    /* Diagnostic pause after actual GPU readback; excluded from throughput timing.
+     * Physical VRAM/GTT device-wide counters can be sampled externally.
+     * Bounded to 3000ms to avoid long-lived GPU allocations. */
+    if(hold_ms) {
+        printf("BENCH_READY phase=post_warmup backend=%s hold_ms=%zu reserved_mib=%zu\n",
+               mock?"mock":"opencl",hold_ms,mib);
+        fflush(stdout);
+        struct timespec req={(time_t)(hold_ms/1000u),(long)((hold_ms%1000u)*1000000u)};
+        while(nanosleep(&req,&req)!=0) {
+            if(errno!=EINTR) {rc=6;goto done;}
+        }
+    }
     double write_s=0,read_s=0;
     for(size_t pass=0;pass<passes;pass++) {
         double a=clock_sec();
