@@ -1,3 +1,7 @@
+> **Güncel deneysel geliştirme: v0.4.0-dev.** [64/256/1024 MiB gerçek RAM/VRAM karşılaştırması ve v1.0 güvenlik hedefleri](v040/README_TR.md). Sistem genelinde SWAP henüz yoktur; v1.0 ilk kararlı sürüm olacaktır.
+
+---
+
 > **Geliştirme dalı v0.3.0-dev:** [Sayfa getirimi, kontrollü prefetch ve v1.0 yol haritası](v030/README_TR.md). Bu hâlâ gerçek sistem SWAP'i değildir; ilk kararlı sürüm yalnızca v1.0 olacaktır.
 
 ---
