@@ -31,3 +31,7 @@ Bu sürüm gerçek Linux SWAP, kernel modülü, fault-latency iyileştirmesi vey
 5. NopenOS için Linux-zen VM reclaim deadlock, GPU reset ve verinin yedeklenmesi şartlarını çöz.
 
 Eski NBD+OpenCL global SWAP çözümü kernel panic oluşturduğu için bu laboratuvar NBD veya swapon kullanmaz; etkin NBD swap varsa başlamayı reddeder.
+
+## Deney modları
+
+`--blocking`: her parçayı tamamlayarak ilerler (4KiB senkron aktarım maliyeti). Varsayılan mod, tüm parçaları asenkron kuyruğa koyup `clFinish` ile bekler (`mode=queued`). `--inject-corruption` sadece açık mock backend ile beklenen fail-closed testi içindir; gerçek GPU üzerinde kabul edilmez.
