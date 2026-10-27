@@ -60,6 +60,8 @@ def run_mode(binary: Path, backend: str, mib: int, ram: int, prefetch: int,
                 and done.get("no_global_swap") == "YES")
         if backend != "cpu":
             good = good and int(result["page_ins"]) == required \
+                and int(result["bulk_import_pages"]) == required \
+                and int(result["bulk_import_batches"]) == (required+63)//64 \
                 and int(result["prefetch_wasted"]) == 0 \
                 and int(result["prefetch_hits"]) == (required if prefetch else 0)
     except (KeyError, ValueError):
