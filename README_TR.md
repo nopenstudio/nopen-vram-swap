@@ -1,36 +1,33 @@
-# Nopen VRAM-SWAP — v0.12.0-alpha.3
+# Nopen VRAM-SWAP — v0.12.0-alpha.4
 
-**Yeni deney:** `userfaultfd` sayfa hataları ile GPU-backed, RAM kotası sınırlı sayfa havuzu birleştirildi. RX 9060 XT üzerinde henüz alfa.3 çalıştırılmadı. Eski OpenCL+NBD sistem SWAP'i **GÜVENLİ DEĞİL** ve kullanılmamalı. Gerçek Linux SWAP, NopenOS için sonraki çekirdek entegrasyon hedefidir; alpha.3 hâlâ **yalnızca deney uygulaması** içindir.
+**Araştırma hedefi:** NopenOS için güvenli ve gerçekten Linux çekirdeğinin kullanabileceği GPU VRAM destekli SWAP. **Mevcut alpha.4 henüz sistem SWAP'i değildir.**
 
-[Alpha.3 Türkçe test rehberi](v012/README_ALPHA3_TR.md) · `nopen-vram-demand` yeni örnek program; daha eski testler korunuyor.
+## Bugüne kadar doğrulananlar
 
----
+- **v0.12.0-alpha.1:** AMD RX 9060 XT OpenCL + Linux `userfaultfd` ile GPU'dan eksik sayfa geri yükleme doğrulandı.
+- **v0.12.0-alpha.2:** Gerçek GPU'da 1.024 mantıksal sayfa / 32 resident RAM sayfası kotası, 6.144 page-out ve 3.072 page-in, veri bütünlüğü başarılı.
+- **v0.12.0-alpha.3:** Gerçek GPU + fault-driven sayfalayıcı, 512 mantıksal sayfa / 16 resident sayfa, 2.976 çıkarma ve 2.480 geri yükleme, veri bütünlüğü başarılı.
+- **v0.12.0-alpha.4:** Rastgele karışık 4 KiB yazma/okuma, çoklu seed, sıcak/soğuk erişim, tam son doğrulama, p50/p95/p99/max işlem gecikmesi, proses tepe RAM ölçümü, toplam 2 milyon işlem sınırı; gerçek kartın alpha.4 stres sonuçları henüz gerekiyor.
 
-# Nopen VRAM-SWAP v0.12.0-alpha.2
+**Önemli:** Önceki OpenCL+NBD üzerinde etkinleştirilen global SWAP, Linux PID1 çöküşüne kadar uzanan kernel panic oluşturdu. Eski NBD scriptlerini **yeniden çalıştırmayın**. Alpha.4'te `/dev/nbd15`, `mkswap`, `swapon`, yeni kernel modülü veya root servisi yoktur.
 
-**Nihai hedef değişmedi: NopenOS'ta gerçek Linux takası.** Şu anda yalnızca uygulama kapsamındaki RAM/GPU sayfa yöneticisini geliştiriyoruz. Daha önceki OpenCL+NBD deneyleri kernel panic'e yol açtığından global SWAP yolu kapalı kalacak.
-
-## Yeni sürüm
-
-64 MiB OpenCL havuzuna karşı 4 KiB mantıksal sayfalar yönetiliyor. RAM'de aynı anda kaç sayfanın kalacağını `--ram-pages` belirliyor. RAM kotası dolunca en eski sayfa GPU'ya yazılıyor; sonraki erişimde doğrulanıp RAM'e alınıyor. Başarısız yazma RAM'deki son kopyayı silmiyor; başarılı okunamayan GPU sayfası yerine sahte sıfır sayfa döndürülmüyor.
-
-```bash
-cd ~/nopen-v012-lab
-git fetch origin develop/v0.12.0-alpha.2
-git switch -c develop/v0.12.0-alpha.2 --track origin/develop/v0.12.0-alpha.2
-cmake -S v012 -B build-v012-a2 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
-cmake --build build-v012-a2 --parallel
-ctest --test-dir build-v012-a2 --output-on-failure
-./build-v012-a2/nopen-vram-managed --backend mock --pool-mib 4 --logical-pages 256 --ram-pages 8 --rounds 2
-```
-
-Gerçek GPU testini oyun kapalıyken gerçekleştirmek için:
+## Garuda kurulum ve deneme
 
 ```bash
-timeout -s TERM -k 5s 120s ./build-v012-a2/nopen-vram-managed \
-  --backend opencl --pool-mib 64 --logical-pages 1024 --ram-pages 32 --rounds 3
+git clone --branch develop/v0.12.0-alpha.4 --single-branch \
+  https://github.com/nopenstudio/nopen-vram-swap.git nopen-v012a4
+cd nopen-v012a4
+cmake -S v012 -B build-v012-a4 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+cmake --build build-v012-a4 --parallel
+ctest --test-dir build-v012-a4 --output-on-failure
+swapon --show
+./build-v012-a4/nopen-vram-demand --probe
 ```
 
-Bu **sistem SWAP'i değildir** ve Bannerlord'a ek RAM vermez; bu sürümde `userfaultfd` ile yeni LRU yöneticisi henüz birbirine bağlanmadı. Önce kullanıcı alanında tam sayfa yaşam döngüsünü doğruluyoruz, ardından NopenOS çekirdeğinde DMA ve GPU resetine dayanıklı gerçek VM entegrasyonuna geçebileceğiz.
+`/dev/nbd15` aktifse testi başlatmayın. İlk gerçek AMD GPU rastgele stres testi için [Alpha.4 Türkçe rehberi](v012/README_ALPHA4_TR.md) içindeki **10.000 işlem/64 MiB** komutunu kullanın. Süre aşımı veya GPU hatası PASS sayılmaz.
 
-[Detaylı test rehberi](v012/README_TR.md) · [Gerçek takas kabul kapıları](v012/docs/TRUE_SWAP_ROADMAP_TR.md)
+## NopenOS yolu
+
+Kullanıcı alanı belleği ≠ çekirdek global SWAP. Tam ürün için GPU reseti sonrası veri geri kazanımı, çekirdek VM reclaim/deadlock analizi, DMA/yedek kaynak garantileri, VM üzerinde güvenli ilk prototip, ardından ayrı test makinesi ve uzun süreli ölçümler gereklidir. [Gerçek Linux SWAP karar belgesi](v012/docs/TRUE_SWAP_ROADMAP_TR.md).
+
+[Kaynak ve İngilizce README](README.md) · [Deneme geçmişi](docs/RELEASES.md).
