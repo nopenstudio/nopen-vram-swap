@@ -1,0 +1,94 @@
+name: v0.5 VM-pressure advisory prototype (safe read-only)
+on:
+  push:
+    branches: ["develop/v0.5.0"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  policy-mock-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build v0.5 and all inherited user-space regressions
+        run: |
+          cmake -S v050 -B build-v050-mock -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-v050-mock --parallel
+          ctest --test-dir build-v050-mock --output-on-failure
+      - name: Pure C11 VM policy (no libc and no kernel references)
+        run: |
+          gcc -std=c11 -ffreestanding -fno-builtin -Wall -Wextra -Werror \
+            -I v050/include -c v050/src/nopen_vm_policy.c -o /tmp/nopen-vm-policy.o
+          test -z "$(nm -u /tmp/nopen-vm-policy.o)"
+      - name: Reject unsupported CLI and privileged kernel controls
+        run: |
+          ! ./build-v050-mock/nopen-vm-probe --watch 0
+          ! ./build-v050-mock/nopen-vm-probe --watch 11
+          ! ./build-v050-mock/nopen-vm-probe --inject
+          ! grep -En 'swapon\(|swapoff\(|NBD_DO_IT|NBD_SET_SOCK|/dev/nbd15|/proc/sys/vm/' \
+              v050/src/nopen_vm_probe.c v050/src/nopen_vm_policy.c
+  opencl-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenCL headers/loader for compile only
+        run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev opencl-headers
+      - name: Compile full GPU backend, exercise mock regressions
+        run: |
+          cmake -S v050 -B build-v050-opencl -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+          cmake --build build-v050-opencl --parallel
+          ctest --test-dir build-v050-opencl --output-on-failure
+  asan-ubsan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sanitized v0.5 and inherited tests
+        run: |
+          cmake -S v050 -B build-v050-san -DCMAKE_BUILD_TYPE=Debug -DNOPEN_OPENCL=OFF \
+            -DCMAKE_C_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' \
+            -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+          cmake --build build-v050-san --parallel
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 \
+            ctest --test-dir build-v050-san --output-on-failure
+
+  ublk-adapter-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install C++20 and liburing headers without loading any block drivers
+        run: sudo apt-get update && sudo apt-get install -y g++ liburing-dev
+      - name: Fetch pinned upstream libublksrv interface
+        run: |
+          git clone --filter=blob:none https://github.com/ublk-org/ublksrv.git /tmp/ublksrv
+          git -C /tmp/ublksrv checkout 6d0d922614ec18e6f2b5d476af8d540a1d9c1de8
+      - name: Compile-check real Linux ublk callback adapter only, no device registration
+        run: |
+          g++ -std=c++20 -Wall -Wextra -fsyntax-only \
+            -I/tmp/ublksrv/include -I/tmp/ublksrv/targets/include \
+            -Iv050/include -Iv012/include \
+            v050/experimental/ublk/nopen_ublk_target.cpp
+          ! grep -En 'swapon\(|swapoff\(|NBD_DO_IT' \
+            v050/experimental/ublk/nopen_ublk_target.cpp
+      - name: Configure and build pinned libublksrv without creating a kernel device
+        run: |
+          sudo apt-get install -y autoconf automake libtool pkg-config ocl-icd-opencl-dev opencl-headers
+          cd /tmp/ublksrv
+          autoreconf -fi
+          ./configure --without-libnfs --without-libiscsi --without-gnutls
+          make -C lib -j2
+      - name: Compile and link experimental ublk adapter binary (NEVER execute)
+        run: |
+          cmake -S v050 -B build-v050-ublk -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+          cmake --build build-v050-ublk --parallel
+          g++ -std=c++20 -Wall -Wextra \
+            -I/tmp/ublksrv/include -I/tmp/ublksrv/targets/include \
+            -Iv050/include -Iv012/include -I/tmp/ublksrv \
+            /tmp/ublksrv/targets/ublksrv_tgt.cpp \
+            v050/experimental/ublk/nopen_ublk_target.cpp \
+            build-v050-ublk/libnopen_blk_backend.a \
+            build-v050-ublk/v040/v030/v012/libnopen_vram_store.a \
+            build-v050-ublk/v040/v030/v012/libnopen_page_core.a \
+            /tmp/ublksrv/lib/.libs/libublksrv.a \
+            -luring -lOpenCL -lpthread -ldl -o /tmp/nopen-v050-ublk-linked
+          test -x /tmp/nopen-v050-ublk-linked
+          echo "UBLK_LINK_PASS executable_linked=YES executed=NO global_swap=NO"

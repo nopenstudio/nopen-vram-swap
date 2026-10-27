@@ -1,3 +1,7 @@
+> **Güncel deneysel geliştirme: v0.5.0-dev.** [Linux-zen VM bellek baskısı sensörü ve güvenli entegrasyon kapıları](v050/README_TR.md). İlk adım yalnızca salt okunur gözlem ve bağımsız C11 politikasıdır; çekirdekte SWAP etkin değildir. İlk kararlı sürüm v1.0 olacaktır.
+
+---
+
 > **Güncel deneysel geliştirme: v0.4.0-dev.** [64/256/1024 MiB gerçek RAM/VRAM karşılaştırması ve v1.0 güvenlik hedefleri](v040/README_TR.md). Sistem genelinde SWAP henüz yoktur; v1.0 ilk kararlı sürüm olacaktır.
 
 ---
