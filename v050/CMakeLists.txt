@@ -33,6 +33,9 @@ find_package(Threads REQUIRED)
 add_executable(nopen-vm-test-blk tests/test_blk_backend.c)
 target_link_libraries(nopen-vm-test-blk PRIVATE nopen_blk_backend)
 target_compile_options(nopen-vm-test-blk PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_executable(nopen-blk-check src/nopen_blk_check.c)
+target_link_libraries(nopen-blk-check PRIVATE nopen_blk_backend)
+target_compile_options(nopen-blk-check PRIVATE -Wall -Wextra -Wpedantic -Werror)
 enable_testing()
 add_test(NAME v050_freestanding_vm_policy COMMAND nopen-vm-test-policy)
 add_test(NAME v050_readonly_sensor_help COMMAND nopen-vm-probe --help)
@@ -52,3 +55,6 @@ set_tests_properties(v050_userfaultfd_pressure_guard_integration PROPERTIES
 
 add_test(NAME v050_checked_gpu_block_io_backend COMMAND nopen-vm-test-blk)
 set_tests_properties(v050_checked_gpu_block_io_backend PROPERTIES PASS_REGULAR_EXPRESSION "BLK_BACKEND_PASS")
+
+add_test(NAME v050_checked_block_transport_stress_mock COMMAND nopen-blk-check --backend mock --operations 1000)
+set_tests_properties(v050_checked_block_transport_stress_mock PROPERTIES PASS_REGULAR_EXPRESSION "BLOCK_IO_PASS")
