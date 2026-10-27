@@ -30,6 +30,11 @@ jobs:
           test "$CODE" -eq 6
           grep -q 'BENCH_FAILED code=6' /tmp/nopen-corruption.log
           ! grep -q 'BENCH_PASS' /tmp/nopen-corruption.log
+      - name: Shell script syntax and safe benchmark matrix configuration
+        run: |
+          bash -n v020/tools/pcie_topology.sh
+          bash -n v020/tools/bench_matrix.sh
+          grep -q 'kill-after=5s' v020/tools/bench_matrix.sh
       - name: Verify freestanding page policy and no dynamic runtime references
         run: |
           gcc -std=c11 -ffreestanding -fno-builtin -Wall -Wextra -Werror \
