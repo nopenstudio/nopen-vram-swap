@@ -223,10 +223,10 @@ static int init(arena *a,nopen_store *s,size_t pages,size_t limit) {
     a->worker_started=1;
     return 0;
 }
-static int positive(const char *s,size_t *v) {
+static int parse_uint(const char *s,size_t *v) {
     if(!s||!*s||*s=='-'||*s=='+')return -1;
     errno=0;char *end=NULL;unsigned long long n=strtoull(s,&end,10);
-    if(errno||end==s||*end||n==0||n>SIZE_MAX)return -1;
+    if(errno||end==s||*end||n>SIZE_MAX)return -1;
     *v=(size_t)n;return 0;
 }
 static void help(void) {
@@ -368,7 +368,7 @@ int main(int argc,char **argv) {
             else if(!strcmp(arg,"--hot-pages"))d=&hot_pages;
             else if(!strcmp(arg,"--hot-percent"))d=&hot_percent;
             else if(!strcmp(arg,"--write-percent"))d=&write_percent;
-            if(!d||positive(val,d)!=0){help();return 2;}
+            if(!d||parse_uint(val,d)!=0){help();return 2;}
         }
     }
     if(probe) {
