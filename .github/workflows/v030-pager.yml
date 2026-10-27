@@ -1,0 +1,51 @@
+name: v0.3.0 cooperative GPU page prefetch integrity (no global swap)
+on:
+  push:
+    branches: ["develop/v0.3.0"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mock-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build all inherited and new pager targets, no OpenCL
+        run: |
+          cmake -S v030 -B build-v030-mock -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-v030-mock --parallel
+          ctest --test-dir build-v030-mock --output-on-failure
+      - name: Reject invalid batch and GPU requests
+        run: |
+          ! ./build-v030-mock/nopen-pager-bench --backend mock --logical-pages 512 --ram-pages 8 --prefetch-pages 16
+          ! ./build-v030-mock/nopen-pager-bench --backend mock --pool-mib 257
+          ! ./build-v030-mock/nopen-pager-bench --backend opencl
+          ! ./build-v030-mock/nopen-pager-bench --logical-pages 512
+      - name: Pure freestanding C11 policy still has no undefined externals
+        run: |
+          gcc -std=c11 -ffreestanding -fno-builtin -Wall -Wextra -Werror -I v012/include \
+            -c v012/src/nopen_page_core.c -o /tmp/nopen-v030-page-core.o
+          test -z "$(nm -u /tmp/nopen-v030-page-core.o)"
+  opencl-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install compile dependencies (runner has no physical GPU)
+        run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev opencl-headers
+      - name: OpenCL build and mock tests
+        run: |
+          cmake -S v030 -B build-v030-opencl -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+          cmake --build build-v030-opencl --parallel
+          ctest --test-dir build-v030-opencl --output-on-failure
+  asan-ubsan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Address and undefined-behavior sanitizer tests
+        run: |
+          cmake -S v030 -B build-v030-san -DCMAKE_BUILD_TYPE=Debug -DNOPEN_OPENCL=OFF \
+            -DCMAKE_C_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' \
+            -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+          cmake --build build-v030-san --parallel
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 \
+            ctest --test-dir build-v030-san --output-on-failure
