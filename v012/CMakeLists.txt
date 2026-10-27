@@ -46,3 +46,20 @@ set_tests_properties(demand_uffd_mock_and_fault_isolation PROPERTIES TIMEOUT 40)
 add_test(NAME demand_random_stress_uffd_mock
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_stress.sh $<TARGET_FILE:nopen-vram-demand>)
 set_tests_properties(demand_random_stress_uffd_mock PROPERTIES TIMEOUT 90)
+
+# Alpha.5: pure C11 policy, decoupled from Linux/GNU/OpenCL implementation.
+add_library(nopen_page_core STATIC src/nopen_page_core.c)
+target_include_directories(nopen_page_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(nopen-vram-demand PRIVATE nopen_page_core)
+target_link_libraries(nopen_vram_memory PUBLIC nopen_page_core)
+add_executable(nopen-vram-test-core tests/test_page_core.c)
+target_link_libraries(nopen-vram-test-core PRIVATE nopen_page_core)
+add_test(NAME portable_page_policy_isolation COMMAND nopen-vram-test-core)
+add_test(NAME alpha5_anonymous_ram_baseline
+         COMMAND nopen-vram-demand --baseline --stress --backend mock --pool-mib 4
+         --logical-pages 128 --ram-pages 8 --operations 1000 --seed 119
+         --hot-pages 16 --hot-percent 80 --write-percent 40)
+
+add_test(NAME alpha5_baseline_comparison_invariants
+         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_economics.sh $<TARGET_FILE:nopen-vram-demand>)
+set_tests_properties(alpha5_baseline_comparison_invariants PROPERTIES TIMEOUT 45)

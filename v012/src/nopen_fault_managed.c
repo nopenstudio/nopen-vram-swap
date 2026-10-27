@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "nopen_store.h"
+#include "nopen_page_core.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
@@ -32,12 +33,11 @@
 #define ERR_CORRUPTION 74
 #define ERR_UFFD 75
 
-typedef enum { P_ZERO=0, P_RESIDENT=1, P_GPU=2 } state;
-typedef struct {
-    state location;
-    uint64_t checksum;
-    uint64_t fault_age;
-} meta;
+/* Platform-neutral policy shared with eventual NopenOS research. */
+#define P_ZERO NOPEN_P_ZERO
+#define P_RESIDENT NOPEN_P_RESIDENT
+#define P_GPU NOPEN_P_GPU
+typedef nopen_page_meta meta;
 typedef struct {
     nopen_store *store; /* Owned by main; lifetime outlives handler. */
     unsigned char *region, *scratch;
@@ -59,11 +59,7 @@ static void fatal(int code, const char *reason, size_t page) {
     _exit(code);
 }
 static uint64_t checksum(const unsigned char *p) {
-    uint64_t v=UINT64_C(14695981039346656037);
-    for(size_t i=0;i<NOPEN_PAGE_SIZE;i++){
-        v^=p[i];v*=UINT64_C(1099511628211);
-    }
-    return v;
+    return nopen_page_checksum(p,NOPEN_PAGE_SIZE);
 }
 static void pattern(unsigned char *p,size_t page,unsigned round) {
     uint64_t n=((uint64_t)page+1)*UINT64_C(0x9E3779B97F4A7C15) ^
@@ -95,6 +91,25 @@ static double seconds(void) {
     clock_gettime(CLOCK_MONOTONIC,&t);
     return (double)t.tv_sec+(double)t.tv_nsec/1e9;
 }
+/* Linux-only telemetry boundary. Procfs RSS does NOT count VRAM itself.
+ * VmHWM and VmRSS may also include loaded OpenCL driver libraries, allocator,
+ * page tables and runtime caches. GPU memory budget is a separate metric. */
+static void memory_snapshot(const char *phase) {
+    FILE *f=fopen("/proc/self/status","r");
+    if(!f) { printf("MEMORY_SNAPSHOT phase=%s available=NO\n",phase); return; }
+    unsigned long rss=0, anon=0, hwm=0;
+    char line[256];
+    while(fgets(line,sizeof(line),f)) {
+        unsigned long k=0;
+        if(sscanf(line,"VmRSS: %lu kB",&k)==1) rss=k;
+        else if(sscanf(line,"RssAnon: %lu kB",&k)==1) anon=k;
+        else if(sscanf(line,"VmHWM: %lu kB",&k)==1) hwm=k;
+    }
+    fclose(f);
+    printf("MEMORY_SNAPSHOT phase=%s rss_kib=%lu rss_anon_kib=%lu hwm_kib=%lu gpu_vram_in_rss=NO\n",
+           phase,rss,anon,hwm);
+    fflush(stdout);
+}
 static int check_swap(void) {
     FILE *f=fopen("/proc/swaps","r");
     if(!f)return -1;
@@ -121,14 +136,7 @@ static int uffd_create(void) {
 #endif
 }
 static size_t oldest(const arena *a) {
-    size_t victim=SIZE_MAX;
-    uint64_t age=UINT64_MAX;
-    for(size_t i=0;i<a->logical;i++) {
-        if(a->pages[i].location==P_RESIDENT && a->pages[i].fault_age<age) {
-            victim=i;age=a->pages[i].fault_age;
-        }
-    }
-    return victim;
+    return nopen_page_oldest(a->pages,a->logical);
 }
 static void evict_oldest(arena *a) {
     size_t victim=oldest(a);
@@ -230,7 +238,8 @@ static int parse_uint(const char *s,size_t *v) {
     *v=(size_t)n;return 0;
 }
 static void help(void) {
-    puts("Nopen 0.12.0-alpha.4: process-only bounded userfaultfd VRAM tier (NOT Linux swap)");
+    puts("Nopen 0.12.0-alpha.5: process-only bounded userfaultfd VRAM tier (NOT Linux swap)");
+    puts("--baseline --stress (CPU anonymous RAM control, no GPU/UFFD)");
     puts("--probe | --backend mock|opencl --pool-mib 64 --logical-pages 512 --ram-pages 16 --rounds 2");
     puts("--inject-read-failure | --inject-write-failure | --inject-corruption (mock only)");
     puts("--stress --operations 20000 --seed 12345 --hot-pages 32 --hot-percent 80 --write-percent 30");
@@ -322,7 +331,7 @@ static int stress_test(arena *a, nopen_backend backend, size_t operations, uint6
     if(samples==0 || read_count+write_count!=operations ||
        peak>a->limit || outs==0 || ins==0 || faults==0)
         fatal(ERR_UFFD,"stress progress/capacity accounting failed",0);
-    printf("STRESS_PASS version=0.12.0-alpha.4 backend=%s seed=%"PRIu64
+    printf("STRESS_PASS version=0.12.0-alpha.5 backend=%s seed=%"PRIu64
            " operations=%zu reads=%zu writes=%zu verified_final_pages=%zu "
            "logical_pages=%zu ram_limit_pages=%zu peak_ram_pages=%"PRIu64
            " faults=%"PRIu64" pageouts=%"PRIu64" pageins=%"PRIu64
@@ -337,17 +346,77 @@ static int stress_test(arena *a, nopen_backend backend, size_t operations, uint6
     free(versions);free(want);free(latency);
     return 0;
 }
+/* Equivalent logical-page workload without UFFD/OpenCL.
+ * The baseline remains allocated until after measurement and final sweep.
+ * Compare results from SEPARATE, freshly started processes using same args.
+ * This is a measurement control, not a claim of net RAM savings. */
+static int baseline_stress(size_t logical,size_t operations,uint64_t seed,
+                           size_t hot_pages,size_t hot_percent,size_t write_percent) {
+    if(logical>SIZE_MAX/NOPEN_PAGE_SIZE) return 2;
+    unsigned char *region=mmap(NULL,logical*NOPEN_PAGE_SIZE,
+                              PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
+    size_t *versions=calloc(logical,sizeof(*versions));
+    unsigned char *want=malloc(NOPEN_PAGE_SIZE);
+    if(region==MAP_FAILED||!versions||!want) {
+        fprintf(stderr,"BASELINE_INIT_FAILED\n");
+        if(region!=MAP_FAILED)munmap(region,logical*NOPEN_PAGE_SIZE);
+        free(versions);free(want);return 5;
+    }
+    memory_snapshot("baseline_before_touch");
+    const double start=seconds();
+    for(size_t p=0;p<logical;p++) {
+        versions[p]=1;
+        pattern(want,p,1);
+        memcpy(region+p*NOPEN_PAGE_SIZE,want,NOPEN_PAGE_SIZE);
+    }
+    memory_snapshot("baseline_filled");
+    uint64_t rng=seed;
+    size_t reads=0,writes=0;
+    for(size_t i=0;i<operations;i++) {
+        uint64_t r=random64(&rng);
+        size_t p=(size_t)(random64(&rng)%(r%100<hot_percent?hot_pages:logical));
+        int writing=(random64(&rng)%100)<write_percent;
+        pattern(want,p,(unsigned)versions[p]);
+        unsigned char *target=region+p*NOPEN_PAGE_SIZE;
+        if(memcmp(want,target,NOPEN_PAGE_SIZE)!=0)
+            fatal(ERR_CORRUPTION,"baseline mismatch",p);
+        if(writing) {
+            versions[p]++;
+            if(versions[p]>UINT32_MAX)fatal(ERR_UFFD,"baseline version overflow",p);
+            pattern(want,p,(unsigned)versions[p]);
+            memcpy(target,want,NOPEN_PAGE_SIZE);
+            writes++;
+        } else reads++;
+    }
+    for(size_t p=logical;p>0;) {
+        p--;
+        pattern(want,p,(unsigned)versions[p]);
+        if(memcmp(want,region+p*NOPEN_PAGE_SIZE,NOPEN_PAGE_SIZE)!=0)
+            fatal(ERR_CORRUPTION,"baseline final sweep mismatch",p);
+    }
+    struct rusage usage;
+    if(getrusage(RUSAGE_SELF,&usage)!=0)fatal(ERR_UFFD,"baseline rusage failed",0);
+    memory_snapshot("baseline_after_workload");
+    printf("BASELINE_PASS version=0.12.0-alpha.5 backend=cpu seed=%"PRIu64
+           " operations=%zu reads=%zu writes=%zu verified_final_pages=%zu "
+           "logical_pages=%zu elapsed_s=%.4f process_maxrss_kib=%ld "
+           "baseline_gpu_allocation_mib=0 no_global_swap=YES\n",
+           seed,operations,reads,writes,logical,logical,seconds()-start,usage.ru_maxrss);
+    free(versions);free(want);munmap(region,logical*NOPEN_PAGE_SIZE);
+    return 0;
+}
 int main(int argc,char **argv) {
     nopen_backend backend=NOPEN_STORE_MOCK;
     size_t pool=64,logical=512,ram=16,rounds=2;
     size_t operations=20000,hot_pages=32,hot_percent=80,write_percent=30;
     size_t seed_arg=12345;
-    int probe=0,inject_read=0,inject_write=0,inject_corrupt=0,stress=0;
+    int probe=0,inject_read=0,inject_write=0,inject_corrupt=0,stress=0,baseline=0;
     for(int i=1;i<argc;i++) {
         const char *arg=argv[i];
         if(!strcmp(arg,"--help")||!strcmp(arg,"-h")){help();return 0;}
         if(!strcmp(arg,"--probe")){probe=1;continue;}
         if(!strcmp(arg,"--stress")){stress=1;continue;}
+        if(!strcmp(arg,"--baseline")){baseline=1;continue;}
         if(!strcmp(arg,"--inject-read-failure")){inject_read=1;continue;}
         if(!strcmp(arg,"--inject-write-failure")){inject_write=1;continue;}
         if(!strcmp(arg,"--inject-corruption")){inject_corrupt=1;continue;}
@@ -376,7 +445,8 @@ int main(int argc,char **argv) {
         if(fd<0){fprintf(stderr,"UFFD_UNAVAILABLE errno=%d (%s)\n",errno,strerror(errno));return 3;}
         close(fd);puts("UFFD_AVAILABLE user-mode-only; no global swap touched");return 0;
     }
-    if(inject_read+inject_write+inject_corrupt>1 ||
+    if((baseline && (!stress || inject_read || inject_write || inject_corrupt)) ||
+       inject_read+inject_write+inject_corrupt>1 ||
        ((inject_read||inject_write||inject_corrupt)&&backend!=NOPEN_STORE_MOCK)||
        !pool||pool>NOPEN_MAX_MIB||!logical||logical>MAX_LAB_PAGES||
        logical>pool*(MiB/NOPEN_PAGE_SIZE)||!ram||ram>=logical||!rounds||rounds>20||
@@ -386,19 +456,25 @@ int main(int argc,char **argv) {
         help();return 2;
     }
     if(check_swap()!=0)return 4;
+    memory_snapshot("entry");
+    if(baseline) return baseline_stress(logical,operations,(uint64_t)seed_arg,
+                                       hot_pages,hot_percent,write_percent);
     nopen_store *s=NULL;
     if(nopen_store_open(&s,backend,pool)!=0){fputs("STORE_INIT_FAILED\n",stderr);return 4;}
+    memory_snapshot("gpu_store_ready");
     arena a;
     if(init(&a,s,logical,ram)!=0) {
         fprintf(stderr,"UFFD_INIT_FAILED errno=%d (%s)\n",errno,strerror(errno));
         destroy(&a);nopen_store_close(s);return 3;
     }
+    memory_snapshot("uffd_ready");
     unsigned char *want=malloc(NOPEN_PAGE_SIZE),*overwrite=calloc(1,NOPEN_PAGE_SIZE);
     if(!want||!overwrite)fatal(ERR_UFFD,"cannot allocate pattern buffer",0);
     const double began=seconds();
     if(stress) {
         int result=stress_test(&a,backend,operations,(uint64_t)seed_arg,
                                hot_pages,hot_percent,write_percent);
+        memory_snapshot("gpu_after_workload");
         destroy(&a);nopen_store_close(s);free(want);free(overwrite);
         return result;
     }
@@ -429,7 +505,7 @@ int main(int argc,char **argv) {
         fflush(stdout);
     }
     const double elapsed=seconds()-began;
-    printf("DEMAND_PASS version=0.12.0-alpha.4 backend=%s pages=%zu ram_page_limit=%zu "
+    printf("DEMAND_PASS version=0.12.0-alpha.5 backend=%s pages=%zu ram_page_limit=%zu "
            "verified_mib=%.2f elapsed_s=%.4f faults=%"PRIu64" pageouts=%"PRIu64
            " pageins=%"PRIu64" peak_ram_pages=%"PRIu64" no_global_swap=YES\n",
            backend==NOPEN_STORE_MOCK?"mock":"opencl",logical,ram,

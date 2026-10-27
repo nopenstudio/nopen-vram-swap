@@ -1,0 +1,58 @@
+name: v0.12 alpha5 page-policy portability and RSS economics (no swap)
+on:
+  push:
+    branches: ["develop/v0.12.0-alpha.5"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mock-uffd-rss:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build mock-only and run full regression
+        run: |
+          cmake -S v012 -B build-mock -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-mock --parallel
+          ctest --test-dir build-mock --output-on-failure
+      - name: Require Linux user-mode UFFD and run economics control
+        run: |
+          ./build-mock/nopen-vram-demand --probe
+          bash v012/tests/test_demand.sh ./build-mock/nopen-vram-demand
+          bash v012/tests/test_stress.sh ./build-mock/nopen-vram-demand
+          bash v012/tests/test_economics.sh ./build-mock/nopen-vram-demand
+      - name: Assert portable page core uses no dynamic runtime symbol
+        run: |
+          gcc -std=c11 -Wall -Wextra -Werror -ffreestanding -fno-builtin \
+            -I v012/include -c v012/src/nopen_page_core.c -o /tmp/nopen-page-core.o
+          test -z "$(nm -u /tmp/nopen-page-core.o)"
+          echo PORTABLE_CORE_PASS
+      - name: No privileged swap interfaces in pager
+        run: |
+          ! grep -En 'NBD_SET_SOCK|NBD_DO_IT|/dev/nbd15|system\(".*swapon' v012/src/nopen_fault_managed.c
+  compile-opencl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenCL compile dependencies (no GPU)
+        run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev opencl-headers
+      - name: Build OpenCL binary and run CPU tests
+        run: |
+          cmake -S v012 -B build-opencl -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+          cmake --build build-opencl --parallel
+          ctest --test-dir build-opencl --output-on-failure
+          ./build-opencl/nopen-vram-demand --help
+  sanitizer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile with ASan/UBSan
+        run: |
+          cmake -S v012 -B build-asan -DCMAKE_BUILD_TYPE=Debug -DNOPEN_OPENCL=OFF \
+            -DCMAKE_C_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' \
+            -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+          cmake --build build-asan --parallel
+      - name: Run memory checks
+        run: |
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 \
+            ctest --test-dir build-asan --output-on-failure

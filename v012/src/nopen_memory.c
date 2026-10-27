@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "nopen_memory.h"
+#include "nopen_page_core.h"
 #include <errno.h>
 #include <inttypes.h>
 #include <limits.h>
@@ -30,12 +31,7 @@ struct nopen_memory {
 };
 
 static uint64_t digest(const unsigned char *data) {
-    /* 64-bit FNV1a is a fast error detector, NOT cryptographic integrity. */
-    uint64_t h=UINT64_C(14695981039346656037);
-    for(size_t i=0;i<NOPEN_PAGE_SIZE;i++) {
-        h ^= (uint64_t)data[i];h *= UINT64_C(1099511628211);
-    }
-    return h;
+    return nopen_page_checksum(data,NOPEN_PAGE_SIZE);
 }
 static int err(nopen_memory*m,const char*where,size_t page,const char *why) {
     snprintf(m->error,sizeof(m->error),"%s page=%zu: %s",where,page,why);

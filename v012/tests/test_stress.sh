@@ -20,7 +20,7 @@ for config in \
     --stress --operations "$OPS" --seed "$SEED" \
     --hot-pages "$HOT" --hot-percent "$HOTP" --write-percent "$WRITEP" \
     > "$TMP/run.log" 2>&1 || { cat "$TMP/run.log"; exit 1; }
-  grep -q 'STRESS_PASS version=0.12.0-alpha.4 backend=mock' "$TMP/run.log"
+  grep -q 'STRESS_PASS version=0.12.0-alpha.5 backend=mock' "$TMP/run.log"
   grep -q "seed=$SEED operations=$OPS" "$TMP/run.log"
   grep -q 'verified_final_pages=128' "$TMP/run.log"
   grep -q 'peak_ram_pages=8' "$TMP/run.log"
