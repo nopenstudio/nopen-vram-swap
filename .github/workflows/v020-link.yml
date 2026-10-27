@@ -30,6 +30,11 @@ jobs:
           test "$CODE" -eq 6
           grep -q 'BENCH_FAILED code=6' /tmp/nopen-corruption.log
           ! grep -q 'BENCH_PASS' /tmp/nopen-corruption.log
+      - name: Verify freestanding page policy and no dynamic runtime references
+        run: |
+          gcc -std=c11 -ffreestanding -fno-builtin -Wall -Wextra -Werror \
+            -I v012/include -c v012/src/nopen_page_core.c -o /tmp/nopen-policy-v020.o
+          test -z "$(nm -u /tmp/nopen-policy-v020.o)"
       - name: Invalid inputs and GPU no-fallback
         run: |
           ! ./build-020-mock/nopen-link-bench --pool-mib 4
