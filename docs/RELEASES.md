@@ -1,16 +1,16 @@
-# Nopen VRAM-SWAP release history
+# Nopen VRAM-SWAP research releases
 
-**Active research: v0.12.0-alpha.4 — deterministic random endurance of process-local GPU-backed UFFD paging.**
-**Strategic goal: safe real Linux swap for NopenOS. Not available yet.**
-
-| Version | Experiment | Verified |
+| Version | Technical milestone | Status |
 |---|---|---|
-| v0.9.2–v0.9.3 | OpenCL GPU storage bridged to Linux swap via user-space NBD | **UNSAFE:** NBD stalls, swap-device I/O errors, SIGBUS, PID1 kernel panic |
-| v0.10.0-alpha.1 | Vulkan GPU memory mapping probe | Test-stage only, no swap |
-| OpenCL benchmark alpha.2 | Full allocation verification on RX 9060 XT | 8 GiB VRAM read/write passed; no swap |
-| v0.12.0-alpha.1 | GPU-backed 4 KiB process-local page restoration with `userfaultfd` | Actual AMD GPU alpha.1 PASS |
-| v0.12.0-alpha.2 | Bounded resident 4 KiB LRU-managed GPU page store | Actual AMD GPU alpha.2 PASS |
-| v0.12.0-alpha.3 | Fault-driven bounded process-local pager | Actual AMD GPU alpha.3 PASS |
-| **v0.12.0-alpha.4** | **Random read/write, hot/cold, reproducible seed, tail-latency and full validation** | GitHub mock+UFFD CI, real AMD OpenCL hardware validation pending |
+| 0.9.x | OpenCL + NBD active global swap | **UNSAFE:** dead NBD, SIGBUS and PID1 panic |
+| 0.10.x | Vulkan and OpenCL VRAM memory probes | VRAM allocation/transfer verified, not swap |
+| 0.12.0-alpha.1 | 4KiB OpenCL + userfaultfd process pager | RX 9060 XT verified |
+| 0.12.0-alpha.2 | Bounded RAM resident pages with GPU LRU storage | RX 9060 XT verified |
+| 0.12.0-alpha.3 | Fault-driven bounded process-local GPU pager | RX 9060 XT verified |
+| 0.12.0-alpha.4 | Randomized 4KiB mixed workload, tail latencies and integrity | RX 9060 XT 100,000 ops verified |
+| **0.12.0-alpha.5** | **Portable page policy + identical CPU baseline and process-RSS accounting** | Local tests pass; CI and real GPU economics gate |
 
-**Do not enable archived NBD-based swap.** See [v0.12 Alpha.4 testing guide](../v012/README_ALPHA4_TR.md) and [NopenOS true swap roadmap](../v012/docs/TRUE_SWAP_ROADMAP_TR.md).
+**NopenOS has not yet been implemented.** Actual Linux VM SWAP, GPU reset recovery and safe kernel reclaim path remain future research goals.
+
+See [alpha.5 Turkish guide](../v012/README_ALPHA5_TR.md). Do not enable historical NBD swap.
+
