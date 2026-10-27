@@ -40,6 +40,9 @@ jobs:
           gcc -std=c11 -ffreestanding -fno-builtin -Wall -Wextra -Werror \
             -I v012/include -c v012/src/nopen_page_core.c -o /tmp/nopen-policy-v020.o
           test -z "$(nm -u /tmp/nopen-policy-v020.o)"
+      - name: Verify offline benchmark report parser
+        run: |
+          python3 v020/tests/test_bench_report.py
       - name: Invalid inputs and GPU no-fallback
         run: |
           ! ./build-020-mock/nopen-link-bench --pool-mib 4
