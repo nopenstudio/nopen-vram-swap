@@ -1,3 +1,7 @@
+> **Experimental v0.3.0 development:** [VRAM page prefetch and the v1.0 release gates](v030/README_TR.md). No transparent system SWAP yet; the first stable release target is v1.0.
+
+---
+
 > **In development:** [v0.2.0 GPU transfer laboratory](v020/README_TR.md) — Alpha.5 is retained as the final architecture alpha. Bulk OpenCL + contiguous page transfer development does not yet constitute global SWAP or a proven speedup.
 
 ---
