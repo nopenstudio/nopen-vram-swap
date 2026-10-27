@@ -61,24 +61,27 @@ static void pattern(unsigned char *dest,size_t page) {
         dest[i]=(unsigned char)(state>>23);
     }
 }
-static void report(const char *backend,size_t logical,size_t ram,size_t pf,
+static int report(const char *backend,size_t logical,size_t ram,size_t pf,
                    double init,double verify,uint64_t checked,
                    const nopen_memory_stats *stats) {
     struct rusage usage;
     if(getrusage(RUSAGE_SELF,&usage)!=0) {
-        fputs("RUSAGE_UNAVAILABLE\n",stderr);return;
+        fputs("RUSAGE_UNAVAILABLE\n",stderr);return -1;
     }
     printf("ECONOMICS_RESULT version=0.4.0-dev backend=%s logical_mib=%zu "
            "logical_pages=%zu resident_limit_pages=%zu prefetch_pages=%zu "
            "init_s=%.6f verify_s=%.6f verified_pages=%"PRIu64" "
            "process_maxrss_kib=%ld page_ins=%"PRIu64" "
-           "page_outs=%"PRIu64" prefetch_hits=%"PRIu64" "
+           "page_outs=%"PRIu64" bulk_import_pages=%"PRIu64" "
+           "bulk_import_batches=%"PRIu64" prefetch_hits=%"PRIu64" "
            "prefetch_wasted=%"PRIu64" no_global_swap=YES "
            "scope=explicit_cooperative_process_only gpu_vram_excluded_from_rss=YES\n",
            backend,logical,logical*256u,ram,pf,init,verify,checked,usage.ru_maxrss,
            stats?stats->page_ins:0,stats?stats->page_outs:0,
+           stats?stats->bulk_import_pages:0,stats?stats->bulk_import_batches:0,
            stats?stats->prefetch_hits:0,stats?stats->prefetch_wasted:0);
     fflush(stdout);
+    return 0;
 }
 int main(int argc,char **argv) {
     enum {MODE_NONE,MODE_CPU,MODE_OPENCL,MODE_MOCK} mode=MODE_NONE;
@@ -183,7 +186,9 @@ int main(int argc,char **argv) {
     nopen_memory_stats stats={0};
     if(m) {
         nopen_memory_get_stats(m,&stats);
-        if(stats.page_ins!=count || stats.prefetch_wasted!=0 ||
+        if(stats.page_ins!=count || stats.bulk_import_pages!=count ||
+           stats.bulk_import_batches!=(count+BATCH-1)/BATCH ||
+           stats.prefetch_wasted!=0 ||
            stats.prefetch_failures!=0 || stats.resident_pages>ram ||
            stats.zero_pages!=0 || stats.prefetch_hits!=(prefetch?count:0) ||
            stats.demand_page_ins!=(prefetch?0:count)) {
@@ -193,9 +198,9 @@ int main(int argc,char **argv) {
             goto finish;
         }
     }
-    report(mode==MODE_CPU?"cpu":mode==MODE_MOCK?"mock":"opencl",
+    if(report(mode==MODE_CPU?"cpu":mode==MODE_MOCK?"mock":"opencl",
            logical,ram,prefetch,filled-before,done-filled,verified,
-           m?&stats:NULL);
+           m?&stats:NULL)!=0)goto finish;
     printf("ECONOMICS_PASS version=0.4.0-dev backend=%s verified_pages=%"PRIu64
            " logical_mib=%zu no_global_swap=YES\n",
            mode==MODE_CPU?"cpu":mode==MODE_MOCK?"mock":"opencl",verified,logical);
