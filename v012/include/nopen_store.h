@@ -13,6 +13,11 @@ typedef struct nopen_store nopen_store;
 
 /* No fallback: OPENCL returns an error if no qualifying discrete AMD GPU. */
 int nopen_store_open(nopen_store **out, nopen_backend backend, size_t mib);
+/* Contiguous pages are sent in bulk; 4KiB page addresses, checked range.
+ * On error the destination may be partially transferred: caller must
+ * validate data before committing page-state metadata. */
+int nopen_store_write_pages(nopen_store *s, size_t first_page, const void *data, size_t pages);
+int nopen_store_read_pages(nopen_store *s, size_t first_page, void *data, size_t pages);
 int nopen_store_write(nopen_store *s, size_t page, const void *data);
 int nopen_store_read(nopen_store *s, size_t page, void *data);
 void nopen_store_close(nopen_store *s);
