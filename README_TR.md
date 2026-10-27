@@ -1,3 +1,15 @@
+# Nopen VRAM-SWAP — v0.12.0-alpha.5
+
+**Yeni özellik:** GNU/Linux bağımlılığı taşımayan saf C11 sayfa politikası + gerçek bellek ekonomisi kıyası (normal RAM ile OpenCL VRAM sayfalayıcısını aynı iş yükünde ölçme).
+
+**Gerçek donanım dayanağı:** Alpha.4 RX 9060 XT, 100.000 rastgele işlemde 1.024/1.024 son sayfa doğrulaması; p99 120,71 µs; 78.753 çıkarma/77.761 geri alma başarılı.
+
+**Sınır:** Bu sürüm Linux sistem SWAP'i değil. NopenOS henüz yapılmadı. Linux-zen / NopenOS çekirdek entegrasyonu gelecek araştırma; eski NBD SWAP'in kernel panic nedeniyle kullanılması güvenli değil.
+
+[**Alpha.5 test rehberi**](v012/README_ALPHA5_TR.md) · [NopenOS taşınabilirlik tasarımı](v012/docs/PORTABILITY_AND_SWAP_TR.md) · [Gerçek SWAP hedefleri](v012/docs/TRUE_SWAP_ROADMAP_TR.md)
+
+---
+
 # Nopen VRAM-SWAP — v0.12.0-alpha.4
 
 **Araştırma hedefi:** NopenOS için güvenli ve gerçekten Linux çekirdeğinin kullanabileceği GPU VRAM destekli SWAP. **Mevcut alpha.4 henüz sistem SWAP'i değildir.**
