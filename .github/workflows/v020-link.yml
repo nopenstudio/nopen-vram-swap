@@ -1,0 +1,45 @@
+name: v0.2.0 safe GPU bulk transport (no swap)
+on:
+  push:
+    branches: ["develop/v0.2.0"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and test mock-only
+        run: |
+          cmake -S v020 -B build-020-mock -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-020-mock --parallel
+          ctest --test-dir build-020-mock --output-on-failure
+      - name: Invalid inputs and GPU no-fallback
+        run: |
+          ! ./build-020-mock/nopen-link-bench --pool-mib 4
+          ! ./build-020-mock/nopen-link-bench --backend mock --pool-mib 257
+          ! ./build-020-mock/nopen-link-bench --backend mock --chunk-kib 5
+          ! ./build-020-mock/nopen-link-bench --backend opencl --pool-mib 4
+  opencl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenCL headers and loader
+        run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev opencl-headers
+      - name: Build real OpenCL backend and mock tests (no AMD GPU on runner)
+        run: |
+          cmake -S v020 -B build-020-opencl -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+          cmake --build build-020-opencl --parallel
+          ctest --test-dir build-020-opencl --output-on-failure
+  sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ASan and UBSan
+        run: |
+          cmake -S v020 -B build-020-asan -DCMAKE_BUILD_TYPE=Debug -DNOPEN_OPENCL=OFF \
+            -DCMAKE_C_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' \
+            -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+          cmake --build build-020-asan --parallel
+          ASAN_OPTIONS=detect_leaks=1 ctest --test-dir build-020-asan --output-on-failure
