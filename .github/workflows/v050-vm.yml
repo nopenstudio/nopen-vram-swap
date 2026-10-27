@@ -71,7 +71,7 @@ jobs:
             v050/experimental/ublk/nopen_ublk_target.cpp
       - name: Configure and build pinned libublksrv without creating a kernel device
         run: |
-          sudo apt-get install -y autoconf automake libtool pkg-config
+          sudo apt-get install -y autoconf automake libtool pkg-config ocl-icd-opencl-dev opencl-headers
           cd /tmp/ublksrv
           autoreconf -fi
           ./configure --without-libnfs --without-libiscsi --without-gnutls
