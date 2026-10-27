@@ -22,6 +22,16 @@ int main(void) {
     b[2050]^=1;
     REQUIRE(nopen_page_checksum(a,sizeof(a))!=nopen_page_checksum(b,sizeof(b)));
     REQUIRE(nopen_page_checksum(NULL,1)==0);
+    size_t resident_ids[] = {3,1,SIZE_MAX,2};
+    ps[1].location=NOPEN_P_RESIDENT;
+    ps[3].location=NOPEN_P_RESIDENT;
+    REQUIRE(nopen_page_oldest_indexed(ps,4,resident_ids,4)==3);
+    ps[3].location=NOPEN_P_GPU;
+    REQUIRE(nopen_page_oldest_indexed(ps,4,resident_ids,4)==1);
+    ps[1].location=NOPEN_P_GPU;
+    REQUIRE(nopen_page_oldest_indexed(ps,4,resident_ids,4)==SIZE_MAX);
+    REQUIRE(nopen_page_oldest_indexed(NULL,4,resident_ids,4)==SIZE_MAX);
+    REQUIRE(nopen_page_oldest_indexed(ps,4,NULL,4)==SIZE_MAX);
     puts("CORE_PASS pure_c11=YES memory_policy=YES gpu_dependency=NO glibc_required_by_source=NO");
     return 0;
 }
