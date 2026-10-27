@@ -40,6 +40,13 @@ jobs:
           gcc -std=c11 -ffreestanding -fno-builtin -Wall -Wextra -Werror \
             -I v012/include -c v012/src/nopen_page_core.c -o /tmp/nopen-policy-v020.o
           test -z "$(nm -u /tmp/nopen-policy-v020.o)"
+      - name: Validate AMDGPU sysfs observer without hardware
+        run: |
+          python3 v020/tests/test_vram_observe.py
+          ./build-020-mock/nopen-link-bench --backend mock --pool-mib 4 \
+            --chunk-kib 256 --passes 1 --hold-ms 5 > /tmp/nopen-hold.txt
+          grep -q 'BENCH_READY phase=post_warmup backend=mock hold_ms=5' /tmp/nopen-hold.txt
+          grep -q 'BENCH_PASS backend=mock' /tmp/nopen-hold.txt
       - name: Verify offline benchmark report parser
         run: |
           python3 v020/tests/test_bench_report.py
