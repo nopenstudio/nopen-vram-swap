@@ -3,6 +3,9 @@
 #include "nopen_store.h"
 #include <stddef.h>
 #include <stdint.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* An actual GPU-backed 4KiB block I/O data plane for future ublk.
  * This is not a registered Linux block device and may not be used as host swap.
@@ -18,4 +21,7 @@ void nopen_blk_close(nopen_blk_backend *b);
 void nopen_blk_inject_failure(nopen_blk_backend *b,size_t operation);
 const char *nopen_blk_last_error(const nopen_blk_backend *b);
 size_t nopen_blk_page_count(const nopen_blk_backend *b);
+#ifdef __cplusplus
+}
+#endif
 #endif
