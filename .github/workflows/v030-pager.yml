@@ -15,6 +15,11 @@ jobs:
           cmake -S v030 -B build-v030-mock -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
           cmake --build build-v030-mock --parallel
           ctest --test-dir build-v030-mock --output-on-failure
+      - name: Demand versus prefetch workload validates comparative accounting
+        run: |
+          python3 v030/tools/compare_prefetch.py --backend mock \
+            --binary build-v030-mock/nopen-pager-bench \
+            --pool-mib 4 --logical-pages 512 --ram-pages 32 --passes 2
       - name: Reject invalid batch and GPU requests
         run: |
           ! ./build-v030-mock/nopen-pager-bench --backend mock --logical-pages 512 --ram-pages 8 --prefetch-pages 16
