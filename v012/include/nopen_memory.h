@@ -36,6 +36,12 @@ int nopen_memory_write(nopen_memory *m, size_t page, const void *in_4k);
  * Requires entire range in GPU state; incomplete/mixed ranges are rejected.
  * A backend eviction failure may result in partial prefetch completion, but
  * previously valid pages are never silently replaced with invalid data. */
+/* v0.4: initialize only ZERO pages directly into VRAM using a contiguous
+ * 1..64 page transfer (up to 256KiB). Metadata commits only after the
+ * backend reports success. No resident RAM page is evicted or modified.
+ * This is for fresh cooperative memory regions, NOT general-purpose swap. */
+int nopen_memory_import_pages(nopen_memory *m, size_t first_page,
+                              const void *src, size_t count);
 int nopen_memory_prefetch(nopen_memory *m, size_t first_page, size_t count);
 int nopen_memory_trim(nopen_memory *m, size_t keep_resident);
 void nopen_memory_get_stats(const nopen_memory *m, nopen_memory_stats *out);
