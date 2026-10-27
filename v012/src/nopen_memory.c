@@ -235,3 +235,29 @@ int nopen_memory_prefetch(nopen_memory *m,size_t first,size_t count) {
     m->stats.prefetch_batches++;
     return 0;
 }
+
+/* Fresh zero-to-GPU bulk import. Validation and metadata are atomic with
+ * respect to transfer failure; physical GPU bytes may be partially changed
+ * on I/O error but ZERO state remains authoritative and safe to retry. */
+int nopen_memory_import_pages(nopen_memory *m, size_t first, const void *src,
+                              size_t count) {
+    if(!m || !src || !count || count>64 || first>=m->pages ||
+       count>m->pages-first) return -1;
+    for(size_t i=0;i<count;i++)
+        if(m->meta[first+i].state!=PAGE_ZERO)
+            return err(m,"import",first+i,"range is not all ZERO pages");
+    if(nopen_store_write_pages(m->store,first,src,count)!=0) {
+        m->stats.failed_writes++;
+        return err(m,"import",first,nopen_store_last_error(m->store));
+    }
+    const unsigned char *p=src;
+    for(size_t i=0;i<count;i++) {
+        page_meta *meta=&m->meta[first+i];
+        meta->checksum=digest(p+i*NOPEN_PAGE_SIZE);
+        meta->state=PAGE_GPU;
+        m->stats.zero_pages--;
+        m->stats.vram_pages++;
+        m->stats.page_outs++;
+    }
+    return 0;
+}
