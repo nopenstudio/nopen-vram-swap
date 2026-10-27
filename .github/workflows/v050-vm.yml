@@ -69,3 +69,26 @@ jobs:
             v050/experimental/ublk/nopen_ublk_target.cpp
           ! grep -En 'swapon\(|swapoff\(|NBD_DO_IT' \
             v050/experimental/ublk/nopen_ublk_target.cpp
+      - name: Configure and build pinned libublksrv without creating a kernel device
+        run: |
+          sudo apt-get install -y autoconf automake libtool pkg-config
+          cd /tmp/ublksrv
+          autoreconf -fi
+          ./configure --without-libnfs --without-libiscsi --without-gnutls
+          make -j2 lib/libublksrv.la
+      - name: Compile and link experimental ublk adapter binary (NEVER execute)
+        run: |
+          cmake -S v050 -B build-v050-ublk -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+          cmake --build build-v050-ublk --parallel
+          g++ -std=c++20 -Wall -Wextra \
+            -I/tmp/ublksrv/include -I/tmp/ublksrv/targets/include \
+            -Iv050/include -Iv012/include -I/tmp/ublksrv \
+            /tmp/ublksrv/targets/ublksrv_tgt.cpp \
+            v050/experimental/ublk/nopen_ublk_target.cpp \
+            build-v050-ublk/libnopen_blk_backend.a \
+            build-v050-ublk/v040/v030/v012/libnopen_vram_store.a \
+            build-v050-ublk/v040/v030/v012/libnopen_page_core.a \
+            /tmp/ublksrv/lib/.libs/libublksrv.a \
+            -luring -lOpenCL -lpthread -ldl -o /tmp/nopen-v050-ublk-linked
+          test -x /tmp/nopen-v050-ublk-linked
+          echo "UBLK_LINK_PASS executable_linked=YES executed=NO global_swap=NO"
