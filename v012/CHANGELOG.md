@@ -1,3 +1,13 @@
+# v0.12.0-alpha.5 — GPU memory economics and policy portability
+
+- Shared page checksum, state types and victim policy compiled without external runtime symbols in ISO C11 freestanding mode.
+- Linux-specific CPU baseline workload using identical deterministic random operations; staged process RSS telemetry for honest comparison.
+- Same GPU UFFD pager as alpha.4, no global SWAP.
+- Release and ASan/UBSan local tests passed; CI gate and actual AMD GPU economics comparison required before claiming RAM advantage.
+- Future NopenOS is unimplemented. Existing OpenCL program still glibc dependent.
+
+---
+
 # v0.12.0-alpha.3 — bounded userfaultfd demand pager
 
 - New `nopen-vram-demand` integrates page-fault-driven restoration, resident-budget eviction, and discrete AMD OpenCL backing.
