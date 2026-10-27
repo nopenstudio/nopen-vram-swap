@@ -35,3 +35,26 @@ Eski NBD+OpenCL global SWAP çözümü kernel panic oluşturduğu için bu labor
 ## Deney modları
 
 `--blocking`: her parçayı tamamlayarak ilerler (4KiB senkron aktarım maliyeti). Varsayılan mod, tüm parçaları asenkron kuyruğa koyup `clFinish` ile bekler (`mode=queued`). `--inject-corruption` sadece açık mock backend ile beklenen fail-closed testi içindir; gerçek GPU üzerinde kabul edilmez.
+
+## Donanımda bir sonraki kanıt: VRAM/GTT ve RSS ölçümü
+
+**v0.2.0-dev donanım gözlemi:** AMDGPU sysfs üzerindeki device-wide bellek sayaçları okunur. Linux kernel belgeleri mem_info_vram_used ve mem_info_gtt_used değerlerini bayt cinsinden sunar. Bu değerler tek bir OpenCL buffer'a ait olmayıp masaüstü ve diğer GPU süreçlerinden de etkilenir.
+
+~~~bash
+cd ~/nopen-v020
+git pull --ff-only
+cmake -S v020 -B build-v020 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+cmake --build build-v020 --parallel
+ctest --test-dir build-v020 --output-on-failure
+python3 v020/tools/vram_observe.py --binary build-v020/nopen-link-bench \
+  --pool-mib 64 --chunk-kib 4096 --passes 5 --hold-ms 2000 \
+  | tee ~/nopen-v020-vram-observe.log
+~~~
+
+Ayrıcalık istemez; GPU/CPU tamponlarını tahsis eder, doğrulanmış GPU readback sonrasında en fazla 2 saniye bekleyerek /sys/bus/pci/devices içindeki AMDGPU sayaçlarını örnekler. Gözlem penceresi transfer bant genişliği süresinin dışındadır. GPU üzerinde iki display kart varsa yanlış atıf yapmamak için çalışmayı reddeder. Aktif NBD swap varsa çalışmayı reddeder; zram'a dokunmaz.
+
+**Gözlem sonuçları:** VRAM_BEFORE, VRAM_PEAK, VRAM_AFTER; özellikle delta_vram_mib, delta_gtt_mib, peak_child_rss_mib. VRAM_OBSERVE_PASS yalnızca kıyas testinin veri doğruluğu ve sysfs örnekleme sürecinin sorunsuz tamamlandığını gösterir; **tekil buffer fiziksel VRAM yerleşimini kesin kanıtlamaz**.
+
+Sonraki adım, aynı sayfa iş yükünde Alpha.5 / v0.2.0 indexed victim selection p99 ve RSS ölçümlerini karşılaştırmaktır. Ana makinede eski global NBD/SWAP yolu kesinlikle etkinleştirilmez.
+
+**Sürüm politikası:** v0.2–v0.9 deneysel. İlk kararlı sürüm v1.0.
