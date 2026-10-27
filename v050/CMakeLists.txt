@@ -20,6 +20,11 @@ target_compile_options(nopen-vm-probe PRIVATE -Wall -Wextra -Wpedantic -Werror)
 add_executable(nopen-vm-test-policy tests/test_vm_policy.c)
 target_link_libraries(nopen-vm-test-policy PRIVATE nopen_vm_policy)
 target_compile_options(nopen-vm-test-policy PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_executable(nopen-vm-gate-integration-test src/nopen_vm_gate.c tests/fake_vm_sensor.c)
+target_link_libraries(nopen-vm-gate-integration-test PRIVATE nopen_vm_policy)
+target_compile_options(nopen-vm-gate-integration-test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_executable(nopen-vm-test-slow-child tests/slow_child.c)
+target_compile_options(nopen-vm-test-slow-child PRIVATE -Wall -Wextra -Wpedantic -Werror)
 enable_testing()
 add_test(NAME v050_freestanding_vm_policy COMMAND nopen-vm-test-policy)
 add_test(NAME v050_readonly_sensor_help COMMAND nopen-vm-probe --help)
@@ -29,3 +34,10 @@ set_tests_properties(v050_freestanding_vm_policy PROPERTIES PASS_REGULAR_EXPRESS
 set_tests_properties(v050_readonly_sensor_help PROPERTIES PASS_REGULAR_EXPRESSION "read-only sensor")
 
 set_tests_properties(v050_uffd_gate_rejects_invalid PROPERTIES WILL_FAIL TRUE)
+add_test(NAME v050_userfaultfd_pressure_guard_integration
+  COMMAND bash "${CMAKE_CURRENT_LIST_DIR}/tests/test_vm_gate.sh"
+  $<TARGET_FILE:nopen-vm-gate-integration-test>
+  $<TARGET_FILE:nopen-vram-demand>
+  $<TARGET_FILE:nopen-vm-test-slow-child>)
+set_tests_properties(v050_userfaultfd_pressure_guard_integration PROPERTIES
+  TIMEOUT 35 PASS_REGULAR_EXPRESSION "VM_GATE_TEST_PASS")
