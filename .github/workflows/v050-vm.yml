@@ -75,7 +75,7 @@ jobs:
           cd /tmp/ublksrv
           autoreconf -fi
           ./configure --without-libnfs --without-libiscsi --without-gnutls
-          make -j2 lib/libublksrv.la
+          make -C lib -j2
       - name: Compile and link experimental ublk adapter binary (NEVER execute)
         run: |
           cmake -S v050 -B build-v050-ublk -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
