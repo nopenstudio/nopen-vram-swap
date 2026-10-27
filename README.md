@@ -1,3 +1,7 @@
+> **Current experimental lane: v0.4.0-dev.** [64/256/1024 MiB CPU-RAM versus cooperative VRAM pager economics](v040/README_TR.md). Not system-wide swap; first stable release is v1.0.
+
+---
+
 > **Experimental v0.3.0 development:** [VRAM page prefetch and the v1.0 release gates](v030/README_TR.md). No transparent system SWAP yet; the first stable release target is v1.0.
 
 ---
