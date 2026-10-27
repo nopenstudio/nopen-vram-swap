@@ -40,3 +40,9 @@ target_link_libraries(nopen-vram-demand PRIVATE nopen_vram_store pthread)
 add_test(NAME demand_uffd_mock_and_fault_isolation
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_demand.sh $<TARGET_FILE:nopen-vram-demand>)
 set_tests_properties(demand_uffd_mock_and_fault_isolation PROPERTIES TIMEOUT 40)
+
+# alpha.4: deterministic random 4KiB long-run stress + fault latency sampling.
+# Every test invokes real userfaultfd only inside its own process.
+add_test(NAME demand_random_stress_uffd_mock
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_stress.sh $<TARGET_FILE:nopen-vram-demand>)
+set_tests_properties(demand_random_stress_uffd_mock PROPERTIES TIMEOUT 90)

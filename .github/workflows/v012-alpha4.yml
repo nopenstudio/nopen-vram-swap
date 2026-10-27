@@ -1,0 +1,51 @@
+name: v0.12.0-alpha.4 isolated UFFD page endurance (NO Linux SWAP)
+on:
+  push:
+    branches: ["develop/v0.12.0-alpha.4"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mock-uffd-endurance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile Release and run regression suite
+        run: |
+          cmake -S v012 -B build-v012-mock -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-v012-mock --parallel
+          ctest --test-dir build-v012-mock --output-on-failure
+      - name: Require real UFFD availability, do not accept a skipped demand test
+        run: |
+          ./build-v012-mock/nopen-vram-demand --probe
+          bash v012/tests/test_demand.sh ./build-v012-mock/nopen-vram-demand
+          bash v012/tests/test_stress.sh ./build-v012-mock/nopen-vram-demand
+      - name: No global system swap interfaces in isolated demand pager
+        run: |
+          ! grep -En 'NBD_SET_SOCK|NBD_DO_IT|/dev/nbd15|system\(".*swapon' v012/src/nopen_fault_managed.c
+  opencl-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenCL headers and ICD loader (no GPU in runner)
+        run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev opencl-headers
+      - name: Build real OpenCL backend and regression tests
+        run: |
+          cmake -S v012 -B build-v012-opencl -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+          cmake --build build-v012-opencl --parallel
+          ctest --test-dir build-v012-opencl --output-on-failure
+          ./build-v012-opencl/nopen-vram-demand --help
+  sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build sanitized CPU/mock-only test image
+        run: |
+          cmake -S v012 -B build-v012-asan -DCMAKE_BUILD_TYPE=Debug -DNOPEN_OPENCL=OFF \
+            -DCMAKE_C_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' \
+            -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+          cmake --build build-v012-asan --parallel
+      - name: Run sanitizer regression and stress tests
+        run: |
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 \
+            ctest --test-dir build-v012-asan --output-on-failure
