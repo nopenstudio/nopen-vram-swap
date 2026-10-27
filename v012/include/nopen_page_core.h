@@ -13,4 +13,7 @@ typedef struct {
 } nopen_page_meta;
 uint64_t nopen_page_checksum(const unsigned char *bytes, size_t length);
 size_t nopen_page_oldest(const nopen_page_meta *pages, size_t count);
+/* Indexed eviction scans resident slots, not the full logical arena. */
+size_t nopen_page_oldest_indexed(const nopen_page_meta *pages, size_t logical_count,
+                                const size_t *resident_ids, size_t resident_slots);
 #endif
