@@ -42,6 +42,7 @@ typedef struct {
     nopen_store *store; /* Owned by main; lifetime outlives handler. */
     unsigned char *region, *scratch;
     meta *pages;
+    size_t *resident_ids; /* bounded, O(resident) victim enumeration */
     size_t logical, limit, resident;
     uint64_t clock;
     atomic_uint_fast64_t faults, from_gpu, to_gpu, zero_faults, peak_resident;
@@ -136,11 +137,14 @@ static int uffd_create(void) {
 #endif
 }
 static size_t oldest(const arena *a) {
-    return nopen_page_oldest(a->pages,a->logical);
+    return nopen_page_oldest_indexed(a->pages,a->logical,a->resident_ids,a->limit);
 }
 static void evict_oldest(arena *a) {
     size_t victim=oldest(a);
     if(victim==SIZE_MAX)fatal(ERR_UFFD,"no resident victim",0);
+    size_t slot=SIZE_MAX;
+    for(size_t i=0;i<a->limit;i++) if(a->resident_ids[i]==victim) {slot=i;break;}
+    if(slot==SIZE_MAX)fatal(ERR_UFFD,"resident victim index inconsistent",victim);
     unsigned char *from=a->region+victim*NOPEN_PAGE_SIZE;
     uint64_t digest=checksum(from);
     if(nopen_store_write(a->store,victim,from)!=0)
@@ -150,6 +154,7 @@ static void evict_oldest(arena *a) {
         fatal(ERR_UFFD,"MADV_DONTNEED failed",victim);
     a->pages[victim].location=P_GPU;
     a->pages[victim].checksum=digest;
+    a->resident_ids[slot]=SIZE_MAX;
     a->resident--;
     atomic_fetch_add(&a->to_gpu,1);
 }
@@ -180,6 +185,10 @@ static void on_fault(arena *a,uintptr_t address) {
         fatal(ERR_UFFD,"UFFDIO_COPY failed",p);
     if(m->location==P_GPU)atomic_fetch_add(&a->from_gpu,1);
     else atomic_fetch_add(&a->zero_faults,1);
+    size_t slot=SIZE_MAX;
+    for(size_t i=0;i<a->limit;i++) if(a->resident_ids[i]==SIZE_MAX) {slot=i;break;}
+    if(slot==SIZE_MAX)fatal(ERR_UFFD,"no free resident index",p);
+    a->resident_ids[slot]=p;
     m->location=P_RESIDENT;
     m->fault_age=++a->clock;
     a->resident++;
@@ -211,15 +220,18 @@ static void destroy(arena *a) {
     if(a->worker_started)pthread_join(a->worker,NULL);
     if(a->uffd>=0)close(a->uffd);
     if(a->region && a->region!=MAP_FAILED)munmap(a->region,a->logical*NOPEN_PAGE_SIZE);
-    free(a->scratch);free(a->pages);
+    free(a->scratch);free(a->resident_ids);free(a->pages);
 }
 static int init(arena *a,nopen_store *s,size_t pages,size_t limit) {
     memset(a,0,sizeof(*a));a->uffd=-1;a->store=s;a->logical=pages;a->limit=limit;
+    if(limit>SIZE_MAX/sizeof(*a->resident_ids))return -1;
     a->pages=calloc(pages,sizeof(*a->pages));
+    a->resident_ids=malloc(limit*sizeof(*a->resident_ids));
     if(posix_memalign((void**)&a->scratch,NOPEN_PAGE_SIZE,NOPEN_PAGE_SIZE)!=0)a->scratch=NULL;
     a->region=mmap(NULL,pages*NOPEN_PAGE_SIZE,PROT_READ|PROT_WRITE,
                    MAP_ANONYMOUS|MAP_PRIVATE,-1,0);
-    if(!a->pages||!a->scratch||a->region==MAP_FAILED)return -1;
+    if(!a->pages||!a->resident_ids||!a->scratch||a->region==MAP_FAILED)return -1;
+    for(size_t i=0;i<limit;i++)a->resident_ids[i]=SIZE_MAX;
     a->uffd=uffd_create();
     if(a->uffd<0)return -1;
     struct uffdio_register reg={.range={.start=(unsigned long)(uintptr_t)a->region,

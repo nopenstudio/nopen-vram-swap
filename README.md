@@ -1,3 +1,7 @@
+> **In development:** [v0.2.0 GPU transfer laboratory](v020/README_TR.md) — Alpha.5 is retained as the final architecture alpha. Bulk OpenCL + contiguous page transfer development does not yet constitute global SWAP or a proven speedup.
+
+---
+
 # Nopen VRAM-SWAP — v0.12.0-alpha.5
 
 **New milestone:** standalone freestanding-friendly ISO C11 page policy and honest process RSS economics. Compare an identical deterministic CPU anonymous-RAM workload against the OpenCL+userfaultfd application-level pager.

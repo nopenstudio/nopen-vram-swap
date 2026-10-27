@@ -1,0 +1,80 @@
+name: v0.2.0 safe GPU bulk transport (no swap)
+on:
+  push:
+    branches: ["develop/v0.2.0"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and test mock-only
+        run: |
+          cmake -S v020 -B build-020-mock -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-020-mock --parallel
+          ctest --test-dir build-020-mock --output-on-failure
+      - name: Legacy pager and new batched store regressions
+        run: |
+          cmake -S v012 -B build-012-regression -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-012-regression --parallel
+          ctest --test-dir build-012-regression --output-on-failure
+      - name: Blocking mode and corruption rejection
+        run: |
+          ./build-020-mock/nopen-link-bench --backend mock --pool-mib 4 --chunk-kib 4 --passes 1 --blocking | grep 'mode=blocking'
+          set +e
+          ./build-020-mock/nopen-link-bench --backend mock --pool-mib 4 --passes 1 --inject-corruption > /tmp/nopen-corruption.log 2>&1
+          CODE=$?
+          set -e
+          test "$CODE" -eq 6
+          grep -q 'BENCH_FAILED code=6' /tmp/nopen-corruption.log
+          ! grep -q 'BENCH_PASS' /tmp/nopen-corruption.log
+      - name: Shell script syntax and safe benchmark matrix configuration
+        run: |
+          bash -n v020/tools/pcie_topology.sh
+          bash -n v020/tools/bench_matrix.sh
+          grep -q 'kill-after=5s' v020/tools/bench_matrix.sh
+      - name: Verify freestanding page policy and no dynamic runtime references
+        run: |
+          gcc -std=c11 -ffreestanding -fno-builtin -Wall -Wextra -Werror \
+            -I v012/include -c v012/src/nopen_page_core.c -o /tmp/nopen-policy-v020.o
+          test -z "$(nm -u /tmp/nopen-policy-v020.o)"
+      - name: Validate AMDGPU sysfs observer without hardware
+        run: |
+          python3 v020/tests/test_vram_observe.py
+          ./build-020-mock/nopen-link-bench --backend mock --pool-mib 4 \
+            --chunk-kib 256 --passes 1 --hold-ms 5 > /tmp/nopen-hold.txt
+          grep -q 'BENCH_READY phase=post_warmup backend=mock hold_ms=5' /tmp/nopen-hold.txt
+          grep -q 'BENCH_PASS backend=mock' /tmp/nopen-hold.txt
+      - name: Verify offline benchmark report parser
+        run: |
+          python3 v020/tests/test_bench_report.py
+      - name: Invalid inputs and GPU no-fallback
+        run: |
+          ! ./build-020-mock/nopen-link-bench --pool-mib 4
+          ! ./build-020-mock/nopen-link-bench --backend mock --pool-mib 257
+          ! ./build-020-mock/nopen-link-bench --backend mock --chunk-kib 5
+          ! ./build-020-mock/nopen-link-bench --backend opencl --pool-mib 4
+  opencl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenCL headers and loader
+        run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev opencl-headers
+      - name: Build real OpenCL backend and mock tests (no AMD GPU on runner)
+        run: |
+          cmake -S v020 -B build-020-opencl -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+          cmake --build build-020-opencl --parallel
+          ctest --test-dir build-020-opencl --output-on-failure
+  sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ASan and UBSan
+        run: |
+          cmake -S v020 -B build-020-asan -DCMAKE_BUILD_TYPE=Debug -DNOPEN_OPENCL=OFF \
+            -DCMAKE_C_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' \
+            -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+          cmake --build build-020-asan --parallel
+          ASAN_OPTIONS=detect_leaks=1 ctest --test-dir build-020-asan --output-on-failure

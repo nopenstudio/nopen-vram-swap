@@ -29,6 +29,24 @@ int main(void) {
     actual[28]^=1;
     pattern(want,1);
     CHECK(memcmp(want,actual,NOPEN_PAGE_SIZE)!=0);
+    /* v0.2 regression: batched write/read, bounds and failure injection. */
+    unsigned char *batch=malloc(4*NOPEN_PAGE_SIZE);
+    unsigned char *got=malloc(4*NOPEN_PAGE_SIZE);
+    CHECK(batch&&got);
+    for(size_t i=0;i<4*NOPEN_PAGE_SIZE;i++)batch[i]=(unsigned char)(i^0xA5u);
+    CHECK(nopen_store_write_pages(s,508,batch,4)==0);
+    CHECK(nopen_store_read_pages(s,508,got,4)==0);
+    CHECK(memcmp(batch,got,4*NOPEN_PAGE_SIZE)==0);
+    CHECK(nopen_store_read_pages(s,511,got,2)!=0);
+    CHECK(nopen_store_write_pages(s,510,batch,3)!=0);
+    CHECK(nopen_store_write_pages(s,0,batch,0)!=0);
+    CHECK(nopen_store_read_pages(s,0,NULL,1)!=0);
+    nopen_store_inject_failure(s,1);
+    CHECK(nopen_store_write_pages(s,1,batch,4)!=0);
+    nopen_store_inject_failure(s,0);
+    CHECK(nopen_store_read_pages(s,508,got,4)==0);
+    CHECK(memcmp(batch,got,4*NOPEN_PAGE_SIZE)==0);
+    free(batch);free(got);
     free(want);free(actual);nopen_store_close(s);
     puts("PASS: 512 simulated GPU pages verified both directions, bounds, fault injection, corruption detection. NO global swap.");
     return 0;

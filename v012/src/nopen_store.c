@@ -117,30 +117,53 @@ int nopen_store_open(nopen_store **out,nopen_backend backend,size_t mib) {
     }
     *out=s;return 0;
 }
-static int io(nopen_store *s,size_t page,void *buf,int write_operation) {
-    if(!s||!buf||page>=s->count)return -1;
+/* Contiguous batch API: one command per GPU segment, not per 4KiB page.
+ * A backend error may leave a partially modified range. Callers must not
+ * commit page-state metadata before success + integrity validation. */
+static int io_pages(nopen_store *s,size_t page,void *buf,size_t pages,int write_operation) {
+    if(!s||!buf||!pages||page>=s->count||pages>s->count-page) return -1;
     s->operations++;
     if(s->fail_at && s->operations>=s->fail_at)return fail(s,"injected GPU I/O fault");
+    const size_t bytes=pages*NOPEN_PAGE_SIZE;
     if(s->backend==NOPEN_STORE_MOCK) {
-        if(write_operation)memcpy(s->mock+page*NOPEN_PAGE_SIZE,buf,NOPEN_PAGE_SIZE);
-        else memcpy(buf,s->mock+page*NOPEN_PAGE_SIZE,NOPEN_PAGE_SIZE);
+        if(write_operation)memcpy(s->mock+page*NOPEN_PAGE_SIZE,buf,bytes);
+        else memcpy(buf,s->mock+page*NOPEN_PAGE_SIZE,bytes);
         return 0;
     }
 #ifdef NOPEN_HAS_OPENCL
-    size_t position=page*NOPEN_PAGE_SIZE;
-    cl_mem seg=s->segment[position/SEG_BYTES];
-    size_t offset=position%SEG_BYTES;
-    cl_int rc=write_operation
-        ?clEnqueueWriteBuffer(s->queue,seg,CL_TRUE,offset,NOPEN_PAGE_SIZE,buf,0,NULL,NULL)
-        :clEnqueueReadBuffer(s->queue,seg,CL_TRUE,offset,NOPEN_PAGE_SIZE,buf,0,NULL,NULL);
-    if(rc!=CL_SUCCESS) {
-        snprintf(s->error,sizeof(s->error),"OpenCL 4KiB %s failed rc=%d",write_operation?"write":"read",rc);
-        return -1;
+    size_t pos=page*NOPEN_PAGE_SIZE;
+    size_t remaining=bytes;
+    unsigned char *host=buf;
+    while(remaining) {
+        const size_t seg_index=pos/SEG_BYTES;
+        const size_t seg_off=pos%SEG_BYTES;
+        size_t n=SEG_BYTES-seg_off;
+        if(n>remaining)n=remaining;
+        cl_mem seg=s->segment[seg_index];
+        cl_int rc=write_operation
+            ?clEnqueueWriteBuffer(s->queue,seg,CL_TRUE,seg_off,n,host,0,NULL,NULL)
+            :clEnqueueReadBuffer(s->queue,seg,CL_TRUE,seg_off,n,host,0,NULL,NULL);
+        if(rc!=CL_SUCCESS) {
+            snprintf(s->error,sizeof(s->error),"OpenCL batch %s failed rc=%d",
+                     write_operation?"write":"read",rc);
+            return -1;
+        }
+        pos+=n;remaining-=n;host+=n;
     }
     return 0;
 #else
     return fail(s,"OpenCL support missing");
 #endif
 }
-int nopen_store_write(nopen_store*s,size_t p,const void*data){return io(s,p,(void*)data,1);}
-int nopen_store_read(nopen_store*s,size_t p,void*data){return io(s,p,data,0);}
+int nopen_store_write_pages(nopen_store*s,size_t page,const void*data,size_t pages) {
+    return io_pages(s,page,(void*)data,pages,1);
+}
+int nopen_store_read_pages(nopen_store*s,size_t page,void*data,size_t pages) {
+    return io_pages(s,page,data,pages,0);
+}
+int nopen_store_write(nopen_store*s,size_t p,const void*data) {
+    return nopen_store_write_pages(s,p,data,1);
+}
+int nopen_store_read(nopen_store*s,size_t p,void*data) {
+    return nopen_store_read_pages(s,p,data,1);
+}
