@@ -1,3 +1,7 @@
+> **Geliştirme dalı v0.3.0-dev:** [Sayfa getirimi, kontrollü prefetch ve v1.0 yol haritası](v030/README_TR.md). Bu hâlâ gerçek sistem SWAP'i değildir; ilk kararlı sürüm yalnızca v1.0 olacaktır.
+
+---
+
 > **Geliştirme:** [v0.2.0-dev GPU veri yolu ölçümü](v020/README_TR.md) — Alpha.5 son mimari alfa olarak korunur. Bu dal gerçek SWAP değildir; gerçek AMD GPU bant genişliği testi ve bellek ekonomisi kabulü henüz bekleniyor.
 
 ---

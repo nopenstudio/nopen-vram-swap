@@ -17,6 +17,7 @@ typedef struct {
     size_t slot;
     uint64_t checksum;
     uint64_t last_used;
+    unsigned char prefetched;
 } page_meta;
 struct nopen_memory {
     nopen_store *store; /* borrowed */
@@ -25,6 +26,7 @@ struct nopen_memory {
     size_t *owner;
     unsigned char *resident;
     unsigned char *scratch;
+    unsigned char *prefetch_buf; /* max 16x4KiB; lazy allocation */
     uint64_t clock;
     nopen_memory_stats stats;
     char error[256];
@@ -67,7 +69,7 @@ int nopen_memory_open(nopen_memory **out,nopen_store *store,size_t pages,size_t 
 void nopen_memory_close(nopen_memory *m) {
     if(!m)return;
     if(m->resident)munmap(m->resident,m->slots*NOPEN_PAGE_SIZE);
-    free(m->scratch);free(m->owner);free(m->meta);free(m);
+    free(m->prefetch_buf);free(m->scratch);free(m->owner);free(m->meta);free(m);
 }
 static void touch(nopen_memory*m,size_t page) {
     /* Renormalize counters extremely conservatively, preserving ordering. */
@@ -101,6 +103,7 @@ static int evict(nopen_memory *m,size_t page) {
         m->stats.failed_writes++;
         return err(m,"evict",page,nopen_store_last_error(m->store));
     }
+    if(p->prefetched) {m->stats.prefetch_wasted++;p->prefetched=0;}
     p->checksum=sum;p->slot=SIZE_MAX;p->state=PAGE_GPU;
     m->owner[slot]=SIZE_MAX;
     m->stats.resident_pages--;m->stats.vram_pages++;m->stats.page_outs++;
@@ -139,6 +142,7 @@ static int ensure_resident(nopen_memory*m,size_t page) {
     if(p->state==PAGE_GPU) {
         memcpy(dst,m->scratch,NOPEN_PAGE_SIZE);
         m->stats.vram_pages--;m->stats.page_ins++;
+        m->stats.demand_page_ins++;
     } else {
         memset(dst,0,NOPEN_PAGE_SIZE);
         m->stats.zero_pages--;
@@ -151,6 +155,10 @@ static int ensure_resident(nopen_memory*m,size_t page) {
 int nopen_memory_read(nopen_memory*m,size_t page,void *out_4k) {
     if(!m||!out_4k||page>=m->pages)return -1;
     if(ensure_resident(m,page)!=0)return -1;
+    if(m->meta[page].prefetched) {
+        m->stats.prefetch_hits++;
+        m->meta[page].prefetched=0;
+    }
     memcpy(out_4k,m->resident+m->meta[page].slot*NOPEN_PAGE_SIZE,NOPEN_PAGE_SIZE);
     m->stats.reads++;return 0;
 }
@@ -168,6 +176,7 @@ int nopen_memory_write(nopen_memory*m,size_t page,const void *in_4k) {
         p->state=PAGE_RESIDENT;p->slot=slot;m->owner[slot]=page;
         m->stats.resident_pages++;
     }
+    if(p->prefetched) {m->stats.prefetch_wasted++;p->prefetched=0;}
     memcpy(m->resident+p->slot*NOPEN_PAGE_SIZE,in_4k,NOPEN_PAGE_SIZE);
     touch(m,page);
     m->stats.writes++;return 0;
@@ -178,5 +187,51 @@ int nopen_memory_trim(nopen_memory*m,size_t keep_resident) {
         size_t victim=oldest(m);
         if(victim==SIZE_MAX||evict(m,victim)!=0)return -1;
     }
+    return 0;
+}
+/* A bounded synchronous cooperative read-ahead, not Linux kernel paging.
+ * Verify all GPU bytes against existing metadata BEFORE evicting live data.
+ * Fail closed; on subsequent eviction failure some correctly verified pages
+ * may already be resident, but no invalid page is committed. */
+int nopen_memory_prefetch(nopen_memory *m,size_t first,size_t count) {
+    if(!m||!count||count>16||count>m->slots||first>=m->pages||
+       count>m->pages-first) return -1;
+    for(size_t i=0;i<count;i++)
+        if(m->meta[first+i].state!=PAGE_GPU)
+            return err(m,"prefetch",first+i,"range must be entirely GPU-resident");
+    if(!m->prefetch_buf) {
+        m->prefetch_buf=malloc(16u*NOPEN_PAGE_SIZE);
+        if(!m->prefetch_buf)return err(m,"prefetch",first,"staging allocation failed");
+    }
+    if(nopen_store_read_pages(m->store,first,m->prefetch_buf,count)!=0) {
+        m->stats.prefetch_failures++;
+        m->stats.failed_reads++;
+        return err(m,"prefetch",first,nopen_store_last_error(m->store));
+    }
+    for(size_t i=0;i<count;i++) {
+        if(digest(m->prefetch_buf+i*NOPEN_PAGE_SIZE)!=m->meta[first+i].checksum) {
+            m->stats.prefetch_failures++;
+            m->stats.checksum_errors++;
+            return err(m,"prefetch",first+i,"checksum mismatch: no pages committed");
+        }
+    }
+    for(size_t i=0;i<count;i++) {
+        const size_t page=first+i;
+        size_t slot=SIZE_MAX;
+        if(find_slot(m,&slot)!=0) {
+            m->stats.prefetch_failures++;
+            return -1;
+        }
+        page_meta *p=&m->meta[page];
+        memcpy(m->resident+slot*NOPEN_PAGE_SIZE,
+               m->prefetch_buf+i*NOPEN_PAGE_SIZE,NOPEN_PAGE_SIZE);
+        p->state=PAGE_RESIDENT;p->slot=slot;p->prefetched=1;
+        m->owner[slot]=page;m->stats.resident_pages++;
+        m->stats.vram_pages--;m->stats.page_ins++;
+        /* Prefetched pages are not counted as application accesses until read. */
+        touch(m,page);
+        m->stats.prefetch_pages++;
+    }
+    m->stats.prefetch_batches++;
     return 0;
 }

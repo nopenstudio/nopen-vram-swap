@@ -16,6 +16,9 @@ typedef struct {
     size_t resident_pages, vram_pages, zero_pages;
     uint64_t page_ins, page_outs, writes, reads;
     uint64_t failed_reads, failed_writes, checksum_errors, madvise_errors;
+    /* v0.3: demand reads and measured prefetch value/waste, not hypothetical hits. */
+    uint64_t prefetch_batches, prefetch_pages, prefetch_hits;
+    uint64_t prefetch_wasted, prefetch_failures, demand_page_ins;
 } nopen_memory_stats;
 
 /* logical_pages <= preallocated VRAM-store page_count; 0 < resident_slots <= logical_pages.
@@ -27,6 +30,13 @@ int nopen_memory_open(nopen_memory **out, nopen_store *store,
 int nopen_memory_read(nopen_memory *m, size_t page, void *out_4k);
 int nopen_memory_write(nopen_memory *m, size_t page, const void *in_4k);
 /* Explicitly push least-recently-used pages to the GPU; never required by Linux reclaim. */
+/* v0.3: read 1..16 adjacent, currently GPU-backed 4KiB pages in one
+ * checked GPU operation. All checksums verified BEFORE RAM eviction.
+ * Single-threaded cooperating application only. Does not page unmodified apps.
+ * Requires entire range in GPU state; incomplete/mixed ranges are rejected.
+ * A backend eviction failure may result in partial prefetch completion, but
+ * previously valid pages are never silently replaced with invalid data. */
+int nopen_memory_prefetch(nopen_memory *m, size_t first_page, size_t count);
 int nopen_memory_trim(nopen_memory *m, size_t keep_resident);
 void nopen_memory_get_stats(const nopen_memory *m, nopen_memory_stats *out);
 const char *nopen_memory_last_error(const nopen_memory *m);
