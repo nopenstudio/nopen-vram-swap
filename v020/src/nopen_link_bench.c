@@ -46,6 +46,8 @@ static int unsafe_swap(void) {
 }
 static void cleanup(gpu *g) {
 #ifdef NOPEN_OPENCL
+    /* Async CL_FALSE commands borrow host buffers: finish before their free. */
+    if(g->queue) (void)clFinish(g->queue);
     if(g->mem) clReleaseMemObject(g->mem);
     if(g->queue) clReleaseCommandQueue(g->queue);
     if(g->context) clReleaseContext(g->context);
