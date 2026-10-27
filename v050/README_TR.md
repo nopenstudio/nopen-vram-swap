@@ -93,3 +93,37 @@ ctest --test-dir build-v050 --output-on-failure
 ### v0.5 kabul durumu
 
 CI mock, asan, OpenCL derleme ve supervised UFFD fault-isolation testi geçti; gerçek RX 9060 XT üzerinde `nopen-vm-gate` donanım kabulü henüz alınmadı. v0.5 uygulama düzeyi Linux VM ABI prototipi geliştirildi fakat çekirdek modülü/gerçek Linux swap için güvenli yeniden kazanım (reclaim) entegrasyonu henüz gerçekleştirilmedi. Bu sınır gizlenmeyecek.
+
+## Kernel ublk yolu: gerçek blok veri motoru ve deneysel bağdaştırıcı
+
+v0.5 kaynak koduna artık *gerçek* OpenCL VRAM kullanabilen 4KiB hizalı `nopen_blk_backend` eklendi (en çok 16 sayfalık tek I/O). Linux `ublk` blok katmanı callback'ini bu motora bağlayan C++ adaptör `v050/experimental/ublk/nopen_ublk_target.cpp` dosyasında. `ublk` resmi kernel blk-mq/io_uring altyapısıdır; kernel doğrudan OpenCL çağırmaz, I/O kullanıcı alanındaki ublk server'a iletilir. Ancak bu tek başına swap reclaim deadlock riskini çözmez.
+
+**Yapılmış doğrulamalar:** explicit mock testlerinde 2000 rastgele okuma/yazma, 128 sayfanın son doğrulanması, 4KiB hizalama/sınır, zorla write/read failure ve poison-page davranışı; CI OpenCL derlemesi ve Linux upstream ublksrv callback C++ sözdizimi kontrolü. Fiziksel RX 9060 XT üzerinde yeni motorun kabul testi ve `ublk` link/runtime/VM block-device testi henüz yapılmadı.
+
+**Sınır:** Bu `ublk` adaptörü standart CMake build'e eklenmez, hiçbir blok aygıtı otomatik oluşturmaz, normal masaüstünde DMI + özel çevre kilidi nedeniyle başlamayı reddeder. **Hiçbir koşulda ana bilgisayarda swap olarak etkinleştirmeyin.** Adaptör `FLUSH`/kalıcılık garanti etmez ve GPU resetinde veri kaybedebilir.
+
+Resmî kernel belge: https://docs.kernel.org/block/ublk.html
+
+### Yeni motorun güvenli donanım test komutu
+
+~~~bash
+cd ~/nopen-v050
+git pull --ff-only
+cmake -S v050 -B build-v050 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+cmake --build build-v050 --parallel
+ctest --test-dir build-v050 --output-on-failure
+./build-v050/nopen-blk-check --backend opencl --operations 1000 | tee ~/nopen-v050-block-gpu.log
+~~~
+
+Bu araç yalnızca ayrı bir kullanıcı sürecinde 64 MiB VRAM ayırır, 4 MiB'lik benzersiz verileri 4KiB bloklar hâlinde doğrular; `ublk` veya global swap başlatmaz. PASS yalnızca **OpenCL blok motoru** için geçerlidir.
+
+### v0.5 kabul kapısı
+
+- [x] Çekirdek kullanıcı alanı VM API (`userfaultfd`) + ayrı watchdog ve PSI.
+- [x] GPU blok backend'i / Linux ublk callback kaynak kodu.
+- [x] Mock, OpenCL kaynak derleme, sanitizer ve upstream ublk başlığı sözdizimi testleri.
+- [ ] RX 9060 XT fiziksel blok motoru kabul testi.
+- [ ] ublk gerçek kernel device lifecycle + I/O testi, yalnızca yalıtılmış kernel test makinesinde.
+- [ ] Kernel reclaim/OOM altında ilerleme, GPU reseti, blok I/O kaybı durumunda güvenli kurtarma ve sistem canlılığı ispatı.
+
+İlk üç madde kod tarafında tamamlanmış olsa da çekirdek reclaim'in SWAP aracılığıyla sisteme bağlanması hâlâ test edilmedi. Bunu 'v0.5 tamamen bitti' olarak sunmak gerçek dışı olur.
