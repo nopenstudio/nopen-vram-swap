@@ -1,6 +1,6 @@
 # Nopen VRAM SWAP v0.5.0-dev — Linux-zen VM-safe architecture gate
 
-**Status: experimental kernel-aware userspace architecture prototype, NOT a kernel module or a Linux swap driver.** The first stable release remains v1.0.
+**Status: experimental guarded Linux userfaultfd prototype, NOT a kernel module or a Linux swap driver.** The first stable release remains v1.0.
 
 ## What v0.4 actually proved
 
@@ -17,7 +17,7 @@ Therefore, no 2x/3x speedup claim is justified. v0.4 tests at 256MiB and 1024MiB
 
 The dangerous approach is to issue GPU commands synchronously from Linux direct reclaim. A GPU allocation / firmware / driver completion path may itself need pageable RAM and reclaim; the reclaim thread then waits for a GPU operation whose progress depends on reclaim. This can produce deadlock, CPU stalls, or system panic. Existing failed NBD global-swap experiments make this particularly important.
 
-This first v0.5 implementation is a **read-only Linux VM advisor**, not yet kernel VM integration:
+v0.5 now includes both **read-only VM advisory** and a **supervised, process-local Linux userfaultfd pager**, not direct kernel reclaim integration:
 
 - Sensor reads /proc/meminfo (MemTotal, MemAvailable); /proc/pressure/memory (PSI some/full avg10); /proc/swaps (active NBD guard); and discrete AMD /sys/bus/pci/devices/.../mem_info_vram_total/used.
 - No sysctl writes, no cgroup mutation, no swapon/swapoff, no NBD, no ioctl, no kernel modules and no root required.
@@ -59,4 +59,37 @@ Official Linux kernel references:
 - MM allocation contexts / direct reclaim: https://docs.kernel.org/core-api/mm-api.html
 - GFP and recursion deadlocks: https://docs.kernel.org/core-api/gfp_mask-from-fs-io.html
 
-**v0.5 first phase means architecture gates and a safe VM telemetry control plane. It does not deliver the promised kernel-side fast path.**
+**v0.5 is an application-local Linux VM ABI prototype with a watchdog; it does not implement a global kernel-side swap/reclaim fast path and cannot yet be called a complete kernel-level memory tier.**
+
+## Yeni: PSI kontrolü altında gerçek userfaultfd alt süreç deneyi
+
+Linux çekirdeğinin `UFFDIO_REGISTER` ve `UFFDIO_COPY` arayüzleriyle yalnızca kendi ayrılmış uygulama bölgesinde page-in / page-out yapan eski `nopen-vram-demand` prototipini v0.5 denetleyicisine bağladık.
+
+- `nopen-vm-gate` ana kullanıcı prosesidir; `nopen_vm_snapshot_linux()` ile MemAvailable, PSI, GPU VRAM ve aktif swap durumunu başlangıçta, ardından 100ms aralıklarla tekrar okur.
+- Yalnızca `NORMAL` / `CONSERVATIVE` koşulunda test alt sürecini `fork` + `execv` ile başlatır; bellek yetersizliği, telemetri kaybı veya GPU cihazının kaybolması hâlinde alt süreci sonlandırır. `--timeout-seconds` 5–60 ile sınırlıdır.
+- Ana prosesin kernel ayarları, swap cihazları ve diğer programların belleği değişmez. OpenCL işlemleri **userfaultfd worker alt sürecinde**, doğrudan kernel reclaim bağlamı dışında yapılır.
+- Mock tabanlı kernel UFFD koşusu + 2. örneklemede yapay bellek baskısı tetikleyerek supervisor'ın yalnızca alt süreci sonlandırmasını sınayan entegrasyon testi CI'ya eklendi.
+- Gözlemci kararları henüz prefetch sayılarına uygulanmaz; output `prefetch_applied=NO` diye raporlar. Kernel reclaim hook da `NO`. Bu iki hedef tamamlanmadan global SWAP iddiası yapılamaz.
+
+### Gerçek donanımda güvenli test
+
+~~~bash
+cd ~/nopen-v050
+git pull --ff-only
+cmake -S v050 -B build-v050 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+cmake --build build-v050 --parallel
+ctest --test-dir build-v050 --output-on-failure
+./build-v050/nopen-vm-gate \
+  --pager "$PWD/build-v050/v040/v030/v012/nopen-vram-demand" \
+  --backend opencl --pool-mib 64 --logical-pages 1024 \
+  --ram-pages 32 --operations 1000 --timeout-seconds 15 \
+  | tee ~/nopen-v050-uffd-gate.log
+~~~
+
+`VM_GATE_PASS`, `STRESS_PASS` ve `verified_final_pages=1024` beraber görülmedikçe donanım kabulü yapılmaz. `VM_GATE_ABORT` sorun saptandığında süreç sonlandırmanın çalıştığını gösterir; bu bir performans kazanımı değildir.
+
+256 MiB v0.4 gerçek GPU sonucunda CPU 264496 KiB / GPU 110104 KiB tepe RSS kullanıldı: GPU yolu **154392 KiB (150.77 MiB; %58.37)** daha az süreç RAM'iyle 65536/65536 sayfayı doğruladı; buna karşılık 4.296529 saniye okumada CPU'nun 0.362705 saniyesinden çok daha yavaştı. Verinin kaynağı: `v050/docs/RX9060XT_V040_256MIB.md`. **Sistem genelinde net RAM kazanımı henüz kanıtlanmadı.**
+
+### v0.5 kabul durumu
+
+CI mock, asan, OpenCL derleme ve supervised UFFD fault-isolation testi geçti; gerçek RX 9060 XT üzerinde `nopen-vm-gate` donanım kabulü henüz alınmadı. v0.5 uygulama düzeyi Linux VM ABI prototipi geliştirildi fakat çekirdek modülü/gerçek Linux swap için güvenli yeniden kazanım (reclaim) entegrasyonu henüz gerçekleştirilmedi. Bu sınır gizlenmeyecek.
