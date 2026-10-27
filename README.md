@@ -1,37 +1,35 @@
-# Nopen VRAM-SWAP — v0.12.0-alpha.3
+# Nopen VRAM-SWAP — v0.12.0-alpha.4
 
-**New milestone:** bounded userfaultfd missing-page handler with fault-recency eviction into discrete AMD OpenCL VRAM. The new `nopen-vram-demand` is a **single-process laboratory**, NOT global Linux swap, a kernel driver, or transparent Bannerlord RAM. The previous NBD swap experiments caused fatal system crashes. The real-swap target for future NopenOS remains conditional on forward-progress and recovery guarantees.
+**Research goal:** real, safe AMD GPU VRAM-backed Linux swap for future NopenOS.
+**Current status:** deterministic random endurance of a *process-local* OpenCL + `userfaultfd` pager, NOT system SWAP.
 
-[Alpha.3 guide](v012/README_ALPHA3_TR.md) · [Source](v012/src/nopen_fault_managed.c)
+The previously tested OpenCL+NBD *global* swap path suffered unrecoverable I/O stalls, cascading SIGBUS errors, and PID 1 kernel panic. Do **not** restart the archived NBD swap services. Neither `/dev/nbd15` nor `swapon` is used in the active v0.12 laboratory.
 
----
+### Verified on RX 9060 XT
 
-# Nopen VRAM-SWAP — v0.12.0-alpha.2
+| Release | Actual hardware observations |
+|---|---|
+| Alpha.1 | AMD OpenCL 64 MiB + userfaultfd 768 page restorations |
+| Alpha.2 | 1,024 logical pages / 32 resident pages; 6,144 evictions, 3,072 page-ins; verified |
+| Alpha.3 | 512 logical pages / 16 resident pages; 2,976 evictions, 2,480 page-ins; verified |
+| Alpha.4 | Random access endurance, sampled operation latency percentiles, full final page verification; **AMD hardware test pending** |
 
-**Research goal: real Linux SWAP on NopenOS. Current milestone: bounded, process-local VRAM memory tier — NOT system SWAP.**
-
-We retired the unsafe OpenCL+NBD global swap path after real GPU load caused system-wide SIGBUS and PID1 panic (2026-10-26). The replacement does not make OpenCL disappear: it treats discrete AMD GPU VRAM as a page store but keeps global Linux memory reclaim and system swap outside the experiment until a kernel-grade forward-progress and GPU-failure model is demonstrated.
-
-## New: managed page memory (v0.12.0-alpha.2)
-
-- ZERO / resident RAM / VRAM page table for 4 KiB logical pages
-- Strict, user-controlled resident RAM page limit and LRU victim selection
-- GPU page-out/page-in via OpenCL or explicit mock backend; CRC-like 64-bit error-detecting digest on page-in
-- Invalid GPU pages are refused; failed page-out retains the last live CPU page
-- Process-local `madvise(MADV_DONTNEED)` on evicted staging pages, no NBD, SWAPON, root privileges, or kernel module
-
-Build on Garuda:
+### Build and test (Garuda Linux)
 
 ```bash
-cmake -S v012 -B build-v012-a2 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
-cmake --build build-v012-a2 --parallel
-ctest --test-dir build-v012-a2 --output-on-failure
-./build-v012-a2/nopen-vram-managed --backend mock --pool-mib 4 --logical-pages 256 --ram-pages 8 --rounds 2
-./build-v012-a2/nopen-vram-managed --backend opencl --pool-mib 64 --logical-pages 1024 --ram-pages 32 --rounds 3
+cmake -S v012 -B build-v012 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+cmake --build build-v012 --parallel
+ctest --test-dir build-v012 --output-on-failure
+./build-v012/nopen-vram-demand --probe
+# Ensure swapon --show contains no NBD device before running:
+./build-v012/nopen-vram-demand \
+  --backend opencl --pool-mib 64 --logical-pages 512 --ram-pages 16 \
+  --stress --operations 10000 --seed 20261027 \
+  --hot-pages 32 --hot-percent 80 --write-percent 30
 ```
 
-The alpha.1 userfaultfd pager remains as `nopen-vram-lab`, separate from the new bounded LRU manager. Merging them and subsequently designing the NopenOS kernel VM interface are future work. Neither the executable nor the existing libraries extend unmodified Bannerlord's RAM yet.
+The alpha.4 stress mode caps GPU allocations at 256 MiB; start with 64 MiB and without running games. A `STRESS_PASS` proves checksums/data equality for the explicit application arena only; it does **not** extend other processes' RAM, guarantee GPU reset recovery, or imply kernel/global swap safety.
 
-[Turkish guide](v012/README_TR.md) · [True Linux SWAP architecture gates](v012/docs/TRUE_SWAP_ROADMAP_TR.md) · [Release notes](v012/CHANGELOG.md).
+[Turkish Alpha.4 guide](v012/README_ALPHA4_TR.md) · [Real Linux SWAP roadmap](v012/docs/TRUE_SWAP_ROADMAP_TR.md) · [History](docs/RELEASES.md)
 
-The old Vulkan v0.10 research probe remains available at repository root with its own top-level CMake project. Historical real swap ZIP archives are **not safe to launch**.
+The historical Vulkan-only probe remains in `src/`; `cmake -S v012` is the current Nopen Memory Fabric build.
