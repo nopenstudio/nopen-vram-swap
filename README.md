@@ -1,3 +1,7 @@
+> **Current experimental lane: v0.5.0-dev.** [Safe Linux VM telemetry and freestanding memory pressure policy](v050/README_TR.md). Read-only kernel-aware userspace prototype, NOT an installed kernel swap module. First stable version targets v1.0.
+
+---
+
 > **Current experimental lane: v0.4.0-dev.** [64/256/1024 MiB CPU-RAM versus cooperative VRAM pager economics](v040/README_TR.md). Not system-wide swap; first stable release is v1.0.
 
 ---
