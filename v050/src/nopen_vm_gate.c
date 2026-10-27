@@ -106,9 +106,16 @@ int main(int argc,char **argv) {
            backend,decision_name(advice.decision),advice.reason,
            advice.prefetch_pages);
     fflush(stdout);
+    /* Buffer child output in an anonymous temporary file. It cannot block
+     * on a full pipe and the supervisor can REQUIRE a real STRESS_PASS proof. */
+    FILE *child_log=tmpfile();
+    if(!child_log){perror("tmpfile");return 4;}
     pid_t child=fork();
-    if(child<0){perror("fork");return 4;}
+    if(child<0){perror("fork");fclose(child_log);return 4;}
     if(child==0) {
+        if(dup2(fileno(child_log),STDOUT_FILENO)<0 ||
+           dup2(fileno(child_log),STDERR_FILENO)<0) _exit(127);
+        fclose(child_log);
         char poolbuf[16],logicalbuf[16],rambuf[16],opsbuf[16];
         snprintf(poolbuf,sizeof poolbuf,"%zu",pool);
         snprintf(logicalbuf,sizeof logicalbuf,"%zu",logical);
@@ -129,18 +136,36 @@ int main(int argc,char **argv) {
     for(;;) {
         pid_t rc=waitpid(child,&status,WNOHANG);
         if(rc==child) {
-            if(WIFEXITED(status)&&WEXITSTATUS(status)==0) {
+            rewind(child_log);
+            char line[1024];
+            int proof=0;
+            char backend_field[48];
+            (void)snprintf(backend_field,sizeof backend_field,"backend=%s",backend);
+            while(fgets(line,sizeof line,child_log)) {
+                fputs(line,stdout);
+                if(strncmp(line,"STRESS_PASS ",12)==0 &&
+                   strstr(line,backend_field)!=NULL &&
+                   strstr(line,"no_global_swap=YES")!=NULL) {
+                    const char *tag=strstr(line," verified_final_pages=");
+                    size_t checked=0;
+                    if(tag && sscanf(tag," verified_final_pages=%zu",&checked)==1 &&
+                       checked==logical)proof=1;
+                }
+            }
+            fclose(child_log);
+            if(WIFEXITED(status)&&WEXITSTATUS(status)==0 && proof) {
                 printf("VM_GATE_PASS child_exit=0 observations=%u "
                        "verified_by_child=YES no_global_swap=YES "
                        "kernel_reclaim_hook=NO\n",samples);
                 return 0;
             }
-            fprintf(stderr,"VM_GATE_FAILED child_status=%d\n",status);
+            fprintf(stderr,"VM_GATE_FAILED child_status=%d proof=%d\n",status,proof);
             return 5;
         }
         if(rc<0) {
             perror("waitpid");
             terminate_child(child);
+            fclose(child_log);
             return 5;
         }
         if(begin<0 || seconds()-begin> (double)seconds_limit) {
@@ -164,6 +189,7 @@ int main(int argc,char **argv) {
         snooze();
     }
     terminate_child(child);
+    fclose(child_log);
     printf("VM_GATE_STOP isolated_child_terminated=YES kernel_swap_untouched=YES\n");
     return code;
 }
