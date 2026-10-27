@@ -1,3 +1,7 @@
+> **Güncel sürüm v0.12.0-alpha.5:** Linux uygulama düzeyinde GPU sayfalama devam ederken saf C11 sayfa politikası ve RAM/VRAM süreç RSS karşılaştırması eklendi. [Alpha.5 Türkçe rehberi](README_ALPHA5_TR.md). NopenOS henüz yalnızca plan aşamasında; gerçek kernel SWAP yok.
+
+---
+
 # Nopen Memory Fabric v0.12.0-alpha.4
 
 **Güncel uygulama testi:** karışık 4 KiB rastgele okuma/yazma yükü, gerçek Linux `userfaultfd` eksik-sayfa olayları, OpenCL VRAM deposu, 4 KiB sayfa bütünlüğü, RAM resident kotası ve gecikme örneklemesi.
