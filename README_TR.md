@@ -1,3 +1,7 @@
+> **Geliştirme:** [v0.2.0-dev GPU veri yolu ölçümü](v020/README_TR.md) — Alpha.5 son mimari alfa olarak korunur. Bu dal gerçek SWAP değildir; gerçek AMD GPU bant genişliği testi ve bellek ekonomisi kabulü henüz bekleniyor.
+
+---
+
 # Nopen VRAM-SWAP — v0.12.0-alpha.5
 
 **Yeni özellik:** GNU/Linux bağımlılığı taşımayan saf C11 sayfa politikası + gerçek bellek ekonomisi kıyası (normal RAM ile OpenCL VRAM sayfalayıcısını aynı iş yükünde ölçme).
