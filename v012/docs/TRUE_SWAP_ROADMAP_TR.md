@@ -1,3 +1,7 @@
+> **2026-10-27 güncellemesi:** Bu dokümandaki aşama tablosu eski alfa.2 araştırma planından kalmıştır. Gerçek AMD donanımında alfa.1–4 kullanıcı alanı testleri geçti. Güncel alfa.5 [taşınabilirlik ve bellek ekonomisi notları](PORTABILITY_AND_SWAP_TR.md) içerisinde. **NopenOS henüz geliştirilmedi, global Linux SWAP yok.**
+
+---
+
 # Nopen VRAM-SWAP: GERÇEK LINUX SWAP hedefi — karar belgesi
 
 **Sürüm:** 0.12.0-alpha.2 — araştırma ve mimari koşulları.
