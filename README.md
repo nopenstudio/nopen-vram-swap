@@ -1,3 +1,15 @@
+# Nopen VRAM-SWAP — v0.12.0-alpha.5
+
+**New milestone:** standalone freestanding-friendly ISO C11 page policy and honest process RSS economics. Compare an identical deterministic CPU anonymous-RAM workload against the OpenCL+userfaultfd application-level pager.
+
+**AMD RX 9060 XT alpha.4 evidence:** 100,000 random 4KiB operations, 1,024/1,024 pages final verification, p99=120.71µs, 78,753 page-outs / 77,761 page-ins. **Alpha.5 OpenCL economics awaits actual GPU measurements.**
+
+**NOT global Linux SWAP, NOT a kernel module, NOT GNU-independent end-to-end, and NOT an implemented NopenOS.** Legacy OpenCL+NBD global swap caused critical system failures; do not restart it.
+
+[Alpha.5 Turkish guide](v012/README_ALPHA5_TR.md) · [Portability and future swap](v012/docs/PORTABILITY_AND_SWAP_TR.md)
+
+---
+
 # Nopen VRAM-SWAP — v0.12.0-alpha.4
 
 **Research goal:** real, safe AMD GPU VRAM-backed Linux swap for future NopenOS.
