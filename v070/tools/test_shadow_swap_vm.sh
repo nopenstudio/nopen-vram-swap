@@ -128,7 +128,11 @@ try:
     for offset in range(0,N,4096):
         if page[offset] != ((offset//4096)*29+7)%256:
             raise RuntimeError(f"swap-in data mismatch at offset {offset}")
-    done.write_text("VERIFIED_ALL_24576_PAGES\n")
+    # Atomic completion: the parent must never see a zero-byte file that
+    # exists before write_text() actually commits the verified marker.
+    temporary=done.with_name(done.name+".tmp")
+    temporary.write_text("VERIFIED_ALL_24576_PAGES\n")
+    temporary.replace(done)
 except Exception as exc:
     print("V070_PAGING_FAILOVER_CHILD_FAILED",repr(exc),file=sys.stderr)
     sys.exit(1)
