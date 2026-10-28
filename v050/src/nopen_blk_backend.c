@@ -37,7 +37,7 @@ static int range(nopen_blk_backend *b,uint64_t offset,size_t bytes,size_t *first
 int nopen_blk_open(nopen_blk_backend **out,nopen_backend backend,size_t mib) {
     if(!out)return -EINVAL;
     *out=NULL;
-    if(mib<1||mib>256 || (backend!=NOPEN_STORE_MOCK && backend!=NOPEN_STORE_OPENCL))
+    if(mib<1||mib>4096 || (backend!=NOPEN_STORE_MOCK && backend!=NOPEN_STORE_OPENCL))
         return -EINVAL;
     nopen_blk_backend *b=calloc(1,sizeof(*b));
     if(!b)return -ENOMEM;
