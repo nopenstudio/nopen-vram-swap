@@ -25,7 +25,10 @@ required=(
     '--property=OOMScoreAdjust=-950',
     '--setenv="NOPEN_UBLK_SHADOW_FILE=$shadowfile"',
     'swapoff "$dev"',
-    'shadowdir="/var/lib/nopen-v070"',
+    'shadowbase="/var/lib/nopen-v070"',
+    'btrfs subvolume create "$shadowdir"',
+    'btrfs subvolume show "$shadowdir"',
+    'snapshot_of_shadow=FORBIDDEN',
     'case "$action" in start|start-pilot|stop|status)',
     'if [[ "$action" == start-pilot ]]',
     'if [[ "$capacity" != "64"',
@@ -40,4 +43,4 @@ test=subprocess.run(["bash",str(path),"start","3"],text=True,capture_output=True
 if test.returncode==0:
     raise AssertionError("invalid pool incorrectly accepted")
 print("V070_GATE_PASS command_syntax=YES consent_required=YES "
-      "zram_preserved=YES invalid_capacity_rejected=YES no_auto_swap=YES failing_physical_swap_blocked=YES independent_systemd_unit=YES durable_shadow_required=YES")
+      "zram_preserved=YES invalid_capacity_rejected=YES no_auto_swap=YES failing_physical_swap_blocked=YES independent_systemd_unit=YES durable_shadow_required=YES btrfs_isolated_subvolume=YES")
