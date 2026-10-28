@@ -81,7 +81,18 @@ int open_target(ublksrv_dev* dev,int,int,char**) {
         ?NOPEN_RECOVERY_HOST_MIRROR:NOPEN_RECOVERY_NO_MIRROR;
     const size_t budget=mode==NOPEN_RECOVERY_HOST_MIRROR
         ?(size_t)72*kMiB:(size_t)1*kMiB;
-    int rc=nopen_recovery_open_bounded(&state->backing,NOPEN_STORE_OPENCL,
+    // Explicit mock enables deterministic kernel ublk lifecycle tests in an
+    // isolated VM without requiring GPU passthrough. No silent fallback.
+    // The DMI and environment opt-in above still reject the desktop host.
+    const char* requested_backend=getenv("NOPEN_UBLK_BACKEND");
+    const nopen_backend backend=requested_backend &&
+        strcmp(requested_backend,"mock")==0?NOPEN_STORE_MOCK:NOPEN_STORE_OPENCL;
+    if(requested_backend && strcmp(requested_backend,"mock")!=0 &&
+       strcmp(requested_backend,"opencl")!=0) {
+        delete state;
+        return -EINVAL;
+    }
+    int rc=nopen_recovery_open_bounded(&state->backing,backend,
                                       kCapacityMiB,mode,budget);
     if(rc!=0) {
         delete state;
