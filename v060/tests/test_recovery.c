@@ -76,6 +76,28 @@ int main(void) {
     CHECK(s.gpu_write_errors==1 && s.fallback_writes==1 &&
           s.state==NOPEN_RECOVERY_CPU_FALLBACK);
     nopen_recovery_close(r);r=NULL;
+    /* Explicit 1MiB host budget refuses a 4MiB CPU mirror. */
+    CHECK(nopen_recovery_open_bounded(&r,NOPEN_STORE_MOCK,4,
+           NOPEN_RECOVERY_HOST_MIRROR,1024u*1024u)==-ENOMEM);
+    CHECK(r==NULL);
+    CHECK(nopen_recovery_open_bounded(&r,NOPEN_STORE_MOCK,4,
+           NOPEN_RECOVERY_NO_MIRROR,1024u*1024u)==0);
+    nopen_recovery_close(r);r=NULL;
+
+    /* Mirror corruption after device loss must reject read without exposing
+     * incorrect bytes. */
+    CHECK(nopen_recovery_open(&r,NOPEN_STORE_MOCK,4,NOPEN_RECOVERY_HOST_MIRROR)==0);
+    CHECK(nopen_recovery_write(r,0,src,P)==0);
+    CHECK(nopen_recovery_device_lost(r)==0);
+    CHECK(nopen_recovery_inject_mirror_corruption(r,0)==0);
+    memset(dst,0xD3,sizeof dst);
+    CHECK(nopen_recovery_read(r,0,dst,P)==-EIO);
+    for(size_t i=0;i<P;i++)CHECK(dst[i]==0xD3);
+    CHECK(nopen_recovery_get_stats(r,&s)==0);
+    CHECK(s.integrity_failures==1 && s.state==NOPEN_RECOVERY_FAILED_CLOSED);
+    CHECK(nopen_recovery_write(r,0,src2,P)==-EIO);
+    nopen_recovery_close(r);r=NULL;
+
     CHECK(nopen_recovery_open(&r,NOPEN_STORE_MOCK,0,NOPEN_RECOVERY_HOST_MIRROR)==-EINVAL);
     CHECK(nopen_recovery_open(&r,NOPEN_STORE_MOCK,4,(nopen_recovery_mode)17)==-EINVAL);
     puts("RECOVERY_TEST_PASS gpu_failure=YES fail_closed=YES mirror_verified=YES "
