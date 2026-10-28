@@ -106,7 +106,7 @@ int nopen_isolated_open(nopen_isolated_io **out,nopen_backend backend,
     if(!absolute_worker_path || *absolute_worker_path!='/' ||
        access(absolute_worker_path,X_OK)!=0 ||
        (backend!=NOPEN_STORE_OPENCL && backend!=NOPEN_STORE_MOCK) ||
-       pool_mib<4 || pool_mib>64 ||
+       pool_mib<4 || pool_mib>4096 ||
        timeout_ms<50 || timeout_ms>5000)return -EINVAL;
     nopen_isolated_io *r=calloc(1,sizeof(*r));
     if(!r)return -ENOMEM;
