@@ -31,6 +31,9 @@ target_compile_options(nopen-isolated-worker PRIVATE -Wall -Wextra -Wpedantic -W
 add_executable(nopen-test-isolated-io tests/test_isolated_io.c)
 target_link_libraries(nopen-test-isolated-io PRIVATE nopen_isolated_io)
 target_compile_options(nopen-test-isolated-io PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_executable(nopen-isolated-smoke src/nopen_isolated_smoke.c)
+target_link_libraries(nopen-isolated-smoke PRIVATE nopen_isolated_io)
+target_compile_options(nopen-isolated-smoke PRIVATE -Wall -Wextra -Wpedantic -Werror)
 enable_testing()
 add_test(NAME v060_gpu_loss_fail_closed_and_cpu_mirror COMMAND nopen-test-recovery)
 set_tests_properties(v060_gpu_loss_fail_closed_and_cpu_mirror PROPERTIES
@@ -67,3 +70,9 @@ add_test(NAME v060_isolated_gpu_process_deadline_and_ipc_checksum
     COMMAND nopen-test-isolated-io $<TARGET_FILE:nopen-isolated-worker>)
 set_tests_properties(v060_isolated_gpu_process_deadline_and_ipc_checksum
     PROPERTIES PASS_REGULAR_EXPRESSION "ISOLATED_TEST_PASS" TIMEOUT 15)
+
+add_test(NAME v060_mock_independent_GPU_worker_integration
+    COMMAND nopen-isolated-smoke --worker $<TARGET_FILE:nopen-isolated-worker>
+            --backend mock --operations 400 --timeout-ms 1000)
+set_tests_properties(v060_mock_independent_GPU_worker_integration PROPERTIES
+    PASS_REGULAR_EXPRESSION "ISOLATED_GPU_PASS" TIMEOUT 15)
