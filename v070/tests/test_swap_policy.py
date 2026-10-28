@@ -25,6 +25,11 @@ required=(
     '--setenv="NOPEN_UBLK_SHADOW_FILE=$shadowfile"',
     'swapoff "$dev"',
     'shadowdir="/var/lib/nopen-v070"',
+    'case "$action" in start|start-pilot|stop|status)',
+    'if [[ "$action" == start-pilot ]]',
+    'if [[ "$capacity" != "64"',
+    'NOPEN_V070_PILOT_ACK=I_ACCEPT_64MIB_KERNEL_GPU_SWAP_RISK',
+    'V070_PILOT_GATE_PASS',
 )
 for phrase in required:
     if phrase not in data: raise AssertionError(f"required guard absent: {phrase}")
