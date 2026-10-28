@@ -18,7 +18,8 @@ typedef struct {
  * A stuck kernel GPU driver cannot be reset by SIGKILL: this isolates the
  * ublk callback's response deadline, NOT kernel liveness. */
 int nopen_isolated_open(nopen_isolated_io **out,nopen_backend backend,
-                       size_t pool_mib,unsigned timeout_ms);
+                       size_t pool_mib,unsigned timeout_ms,
+                       const char *absolute_worker_path);
 int nopen_isolated_read(nopen_isolated_io *ctx,uint64_t offset,void *dest,size_t size);
 int nopen_isolated_write(nopen_isolated_io *ctx,uint64_t offset,const void *src,size_t size);
 int nopen_isolated_stats_get(nopen_isolated_io *ctx,nopen_isolated_stats *out);
