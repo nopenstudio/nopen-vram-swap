@@ -205,6 +205,27 @@ int nopen_shadow_mock_inject_gpu_hang(nopen_shadow *s) {
     pthread_mutex_unlock(&s->lock);
     return rc;
 }
+int nopen_shadow_simulate_gpu_loss(nopen_shadow *s) {
+    if(!s)return -EINVAL;
+    pthread_mutex_lock(&s->lock);
+    if(s->poisoned) {
+        pthread_mutex_unlock(&s->lock);
+        return -EIO;
+    }
+    if(s->gpu_active) {
+        s->gpu_active=0;
+        s->stats.gpu_active=0;
+        s->stats.gpu_failures++;
+        /* Explicit worker termination, NOT a GPU firmware/kernel reset. */
+        nopen_isolated_close(s->gpu);
+        s->gpu=NULL;
+        fprintf(stderr,"NOPEN_SHADOW_SIMULATED_LOSS "
+                       "worker_terminated=YES physical_gpu_reset=NO "
+                       "durable_copy=YES\n");
+    }
+    pthread_mutex_unlock(&s->lock);
+    return 0;
+}
 void nopen_shadow_close(nopen_shadow *s) {
     if(!s)return;
     pthread_mutex_lock(&s->lock);
