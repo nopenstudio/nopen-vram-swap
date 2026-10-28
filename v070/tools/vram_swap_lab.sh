@@ -134,7 +134,7 @@ case "$shadowtype" in
   *) echo "V070_REFUSED SSD shadow filesystem $shadowtype not approved (requires ext4/xfs O_DIRECT preallocation)" >&2
      exit 2 ;;
 esac
-shadowfile="$shadowdir/shadow-$(date +%Y%m%d-%H%M%S)-$.bin"
+shadowfile="$shadowdir/shadow-$(date +%Y%m%d-%H%M%S)-${BASHPID}.bin"
 [[ ! -e "$shadowfile" ]] || { echo "V070_REFUSED shadow file exists" >&2; exit 2; }
 printf '%s\n' "$shadowfile" > "$state/shadow-file"
 install -d -m 0750 -g "$(id -gn "${SUDO_USER:-root}")" "$logdir"
