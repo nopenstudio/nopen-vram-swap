@@ -5,6 +5,8 @@
 #include <errno.h>
 #include <poll.h>
 #include <pthread.h>
+#include <stdio.h>
+#include <inttypes.h>
 #include <spawn.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -91,10 +93,23 @@ static void terminate_child(nopen_isolated_io *r) {
     r->alive=0;
     r->stats.child_alive=0;
 }
-static int fail_io(nopen_isolated_io *r,int code) {
+static int fail_io(nopen_isolated_io *r,int code,uint32_t op,
+                   uint64_t offset,size_t bytes,const char *stage) {
     if(code==-ETIMEDOUT)r->stats.timeouts++;
     else r->stats.child_crashes++;
     r->stats.io_errors++;
+    /* The FIRST negative return is the decisive incident. Logging only a
+     * classification rather than raw buffer content avoids data disclosure. */
+    fprintf(stderr,
+        "NOPEN_IPC_FATAL monotonic_ms=%" PRIu64
+        " backend=%s worker_pid=%ld op=%s offset=%" PRIu64
+        " bytes=%zu stage=%s errno=%d deadline_ms=%u"
+        " fail_closed=YES no_global_swap_recovery=YES\n",
+        monotonic_ms(),r->backend==NOPEN_STORE_OPENCL?"opencl":"mock",
+        (long)r->pid,op==NOPEN_IPC_READ?"READ":
+        op==NOPEN_IPC_WRITE?"WRITE":"INJECT",offset,bytes,stage,
+        -code,r->timeout_ms);
+    fflush(stderr);
     terminate_child(r);
     return code;
 }
@@ -175,24 +190,38 @@ static int transfer(nopen_isolated_io *r,uint32_t op,uint64_t off,
     uint64_t deadline=monotonic_ms()+r->timeout_ms;
     nopen_ipc_msg req={NOPEN_IPC_MAGIC,op,off,(uint32_t)bytes,0,
                          op==NOPEN_IPC_WRITE?nopen_page_checksum(src,bytes):0};
+    const char *stage="send_header";
     int rc=send_exact(r->fd,&req,sizeof(req),deadline);
-    if(!rc && op==NOPEN_IPC_WRITE)
+    if(!rc && op==NOPEN_IPC_WRITE) {
+        stage="send_payload";
         rc=send_exact(r->fd,src,bytes,deadline);
+    }
     nopen_ipc_msg response={0};
-    if(!rc)rc=recv_exact(r->fd,&response,sizeof response,deadline);
     if(!rc) {
+        stage="recv_header";
+        rc=recv_exact(r->fd,&response,sizeof response,deadline);
+    }
+    if(!rc) {
+        stage="validate_header";
         if(response.magic!=NOPEN_IPC_MAGIC || response.op!=op ||
            response.offset!=off || response.bytes!=bytes ||
-           response.status!=0 ||
            (op==NOPEN_IPC_WRITE && response.checksum!=req.checksum))rc=-EIO;
+        else if(response.status!=0) {
+            stage="worker_backend_error";
+            rc=response.status<0?response.status:-EIO;
+        }
     }
     if(!rc && op==NOPEN_IPC_READ) {
+        stage="recv_payload";
         rc=recv_exact(r->fd,r->staging,bytes,deadline);
-        if(!rc && nopen_page_checksum(r->staging,bytes)!=response.checksum)
-            rc=-EBADMSG;
+        if(!rc) {
+            stage="validate_checksum";
+            if(nopen_page_checksum(r->staging,bytes)!=response.checksum)
+                rc=-EBADMSG;
+        }
         if(!rc)memcpy(dest,r->staging,bytes);
     }
-    if(rc)rc=fail_io(r,rc);
+    if(rc)rc=fail_io(r,rc,op,off,bytes,stage);
     else r->stats.operations++;
     pthread_mutex_unlock(&r->lock);
     return rc;
@@ -223,7 +252,7 @@ int nopen_isolated_inject_hang(nopen_isolated_io *r) {
     int rc=send_exact(r->fd,&msg,sizeof msg,deadline);
     if(!rc)rc=recv_exact(r->fd,&msg,sizeof msg,deadline);
     if(!rc)rc=-EIO; /* A hang-injection test is NEVER allowed to pass. */
-    rc=fail_io(r,rc);
+    rc=fail_io(r,rc,NOPEN_IPC_HANG_TEST_ONLY,0,0,"test_hang");
     pthread_mutex_unlock(&r->lock);
     return rc;
 }
