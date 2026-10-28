@@ -136,7 +136,7 @@ int main(int argc,char **argv) {
     struct rusage usage;
     const double elapsed=now()-start;
     if(elapsed<=0 || getrusage(RUSAGE_SELF,&usage)!=0)goto done;
-    printf("RECOVERY_RESULT version=0.6.0-dev backend=%s mode=%s operations=%zu "
+    printf("RECOVERY_RESULT version=0.6.0-dev backend=%s mode=%s "
            "fault_injection=simulated_notification_ONLY real_gpu_reset=NO "
            "rebuild_after_loss=%d rebuild_successes=%"PRIu64" rebuild_verified_pages=%"PRIu64" "
            "operations=%zu successful=%zu denied=%zu reads=%zu writes=%zu "
