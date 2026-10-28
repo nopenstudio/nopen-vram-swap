@@ -16,6 +16,7 @@ required=(
     'is_active',
     'V070_SWAP_ACTIVE',
     'V070_STOP_PASS',
+    'V070_STOP_ALREADY_INACTIVE',
     'modprobe ublk_drv',
     'I_ACCEPT_GPU_SWAP_REBOOT',
     'zram_untouched=YES',
