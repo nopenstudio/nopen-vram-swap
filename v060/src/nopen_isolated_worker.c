@@ -39,7 +39,7 @@ int main(int argc,char **argv) {
     char *end=NULL;
     errno=0;
     unsigned long mib=strtoul(argv[2],&end,10);
-    if(!backend||errno||end==argv[2]||*end||mib<4||mib>64)return 2;
+    if(!backend||errno||end==argv[2]||*end||mib<4||mib>4096)return 2;
     const int fd=3;
     nopen_blk_backend *b=NULL;
     int open_rc=nopen_blk_open(&b,backend,(size_t)mib);
