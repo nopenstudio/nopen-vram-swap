@@ -17,12 +17,13 @@ controller="$build/ublksrv-upstream/ublk"
 worker="$build/v060/nopen-isolated-worker"
 service="nopen-v070-ublk.service"
 usage() {
-  echo "Usage: sudo bash v070/tools/vram_swap_lab.sh start {64|256|1024|2048|4096}" >&2
+  echo "Usage: sudo bash v070/tools/vram_swap_lab.sh start-pilot 64 (explicit opt-in required)" >&2
+  echo "       Legacy start {64|256|1024|2048|4096} remains BLOCKED" >&2
   echo "       sudo bash v070/tools/vram_swap_lab.sh stop" >&2
   echo "       bash v070/tools/vram_swap_lab.sh status" >&2
 }
 is_active() { swapon --noheadings --raw --show=NAME 2>/dev/null | grep -Fxq "$dev"; }
-case "$action" in start|stop|status) : ;; *) usage; exit 2 ;; esac
+case "$action" in start|start-pilot|stop|status) : ;; *) usage; exit 2 ;; esac
 if [[ "$action" == status ]]; then
   echo "V070_STATUS device=$dev exists=$([[ -b "$dev" ]] && echo yes || echo no)"
   swapon --show
@@ -80,6 +81,17 @@ if [[ "$action" == start ]]; then
   echo "Do not restart kernel SWAP until new implementation passes failure recovery gates." >&2
   exit 9
 fi
+# The only approved host kernel SWAP entrypoint is a deliberately tiny
+# 64MiB pilot, guarded by a second exact acknowledgement. Legacy start still
+# rejects all physical SWAP until Issue #7 has a final resolution.
+if [[ "$action" == start-pilot ]]; then
+  if [[ "$capacity" != "64" ||
+        "$(printenv NOPEN_V070_PILOT_ACK || :)" != "I_ACCEPT_64MIB_KERNEL_GPU_SWAP_RISK" ]]; then
+    echo "V070_PILOT_REFUSED require exactly 64MiB and NOPEN_V070_PILOT_ACK=I_ACCEPT_64MIB_KERNEL_GPU_SWAP_RISK" >&2
+    exit 9
+  fi
+  echo "V070_PILOT_GATE_PASS max_capacity_mib=64 full_swap_release=NO"
+fi
 [[ "$capacity" =~ ^(64|256|1024|2048|4096)$ ]] || { usage; exit 2; }
 command -v systemd-run >/dev/null ||
   { echo "V070_REFUSED root system service manager unavailable" >&2; exit 2; }
@@ -108,6 +120,14 @@ if [[ "$(printenv NOPEN_V070_ACCEPT_RISK || :)" != "I_ACCEPT_GPU_SWAP_REBOOT" ]]
 fi
 install -d -m 0700 "$state"
 install -d -m 0700 "$shadowdir"
+# Reject if the dedicated SSD shadow cannot fit plus a 256MiB reserve.
+# SSD shadow WRITE-through is intentionally slower than pure VRAM.
+free_kib="$(df -Pk "$shadowdir" | awk 'NR==2{print $4}')"
+if [[ ! "$free_kib" =~ ^[0-9]+$ ]] ||
+   (( free_kib < capacity * 1024 + 262144 )); then
+  echo "V070_PILOT_REFUSED insufficient independent SSD capacity" >&2
+  exit 2
+fi
 shadowtype="$(stat -f -c '%T' "$shadowdir")"
 case "$shadowtype" in
   ext2/ext3|xfs) ;;
@@ -124,7 +144,7 @@ ln -sfn "$logfile" "$state/log"
 printf '%s\n' "$dev" > "$state/device"
 printf '%s\n' "$capacity" > "$state/capacity"
 swapon --show > "$state/swapon-before.txt"
-echo "V070_START pool_mib=$capacity device=$dev priority=$priority zram_preserved=YES" | tee "$state/start.log"
+echo "V070_START mode=$action pool_mib=$capacity device=$dev priority=$priority zram_preserved=YES durable_ssd_shadow=REQUIRED" | tee "$state/start.log"
 echo "V070_PERSISTENT_LOG file=$logfile realtime_log=YES"
 echo "V070_SHADOW_PREPARE path=$shadowfile durability=O_DIRECT_O_DSYNC"
 # The ublk target runs in the foreground as a SYSTEM service; the service is
@@ -191,5 +211,5 @@ if ! is_active; then
   echo "V070_START_FAILED no active kernel swap after swapon" >&2
   exit 7
 fi
-echo "V070_SWAP_ACTIVE device=$dev pool_mib=$capacity priority=$priority service=$service root_system_service=YES real_gpu=YES direct_io_verified=YES zram_untouched=YES"
+echo "V070_SWAP_ACTIVE mode=$action device=$dev pool_mib=$capacity priority=$priority service=$service root_system_service=YES real_gpu=YES durable_ssd_shadow=YES direct_io_verified=YES zram_untouched=YES"
 echo "To stop: sudo bash $repo/v070/tools/vram_swap_lab.sh stop"
