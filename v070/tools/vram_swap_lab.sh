@@ -14,6 +14,7 @@ priority=200
 target="$build/nopen-v070-ublk"
 controller="$build/ublksrv-upstream/ublk"
 worker="$build/v060/nopen-isolated-worker"
+service="nopen-v070-ublk.service"
 usage() {
   echo "Usage: sudo bash v070/tools/vram_swap_lab.sh start {64|256|1024|2048|4096}" >&2
   echo "       sudo bash v070/tools/vram_swap_lab.sh stop" >&2
@@ -24,7 +25,8 @@ case "$action" in start|stop|status) : ;; *) usage; exit 2 ;; esac
 if [[ "$action" == status ]]; then
   echo "V070_STATUS device=$dev exists=$([[ -b "$dev" ]] && echo yes || echo no)"
   swapon --show
-  [[ ! -r "$state/pid" ]] || { echo "NOPEN_SERVER_PID=$(cat "$state/pid")"; }
+  systemctl is-active "$service" 2>/dev/null || true
+  systemctl show "$service" --property=MainPID --property=ControlGroup --no-pager 2>/dev/null || true
   [[ ! -r "$state/log" ]] || tail -n 12 "$state/log"
   exit 0
 fi
@@ -48,9 +50,12 @@ if [[ "$action" == stop ]]; then
       exit 6
     fi
   fi
-  if [[ -r "$state/pid" ]]; then
-    pid="$(cat "$state/pid")"
-    if [[ "$pid" =~ ^[0-9]+$ ]]; then kill "$pid" 2>/dev/null || true; fi
+  if systemctl is-active --quiet "$service"; then
+    systemctl stop "$service"
+  fi
+  if systemctl is-active --quiet "$service"; then
+    echo "V070_STOP_FAILED root system service remains active" >&2
+    exit 7
   fi
   echo "V070_STOP_PASS device_removed=YES zram_untouched=YES"
   rm -f "$state/pid" "$state/device" "$state/capacity"
@@ -67,6 +72,12 @@ if [[ "$action" == start ]]; then
   exit 9
 fi
 [[ "$capacity" =~ ^(64|256|1024|2048|4096)$ ]] || { usage; exit 2; }
+command -v systemd-run >/dev/null ||
+  { echo "V070_REFUSED root system service manager unavailable" >&2; exit 2; }
+if systemctl is-active --quiet "$service"; then
+  echo "V070_REFUSED system service already active; inspect/stop previous Nopen swap" >&2
+  exit 2
+fi
 [[ -x "$target" && -x "$controller" && -x "$worker" ]] ||
   { echo "V070_REFUSED run bash v070/tools/build_ublk.sh first" >&2; exit 2; }
 [[ ! -e "$dev" && ! -e "/dev/ublkc23" ]] ||
@@ -96,23 +107,40 @@ printf '%s\n' "$capacity" > "$state/capacity"
 swapon --show > "$state/swapon-before.txt"
 echo "V070_START pool_mib=$capacity device=$dev priority=$priority zram_preserved=YES" | tee "$state/start.log"
 echo "V070_PERSISTENT_LOG file=$logfile realtime_log=YES"
-NOPEN_V070_KERNEL_SWAP_TEST=EXPERIMENTAL_GPU_SWAP_CAN_HANG \
-NOPEN_UBLK_BACKEND=opencl \
-NOPEN_V070_CAPACITY_MIB="$capacity" \
-NOPEN_UBLK_WORKER_BIN="$worker" \
-"$target" add -t nopen-vram-swap-lab -n "$id" -q 1 -d 16 \
-  --max_io_buf_bytes 65536 > "$logfile" 2>&1 &
-server_pid=$!
+# The ublk target runs in the foreground as a SYSTEM service; the service is
+# independent of user@1000.service/KDE. This corrects the observed session
+# teardown problem, but does not fix the earlier kernel WRITE timeout.
+if ! systemd-run --system --quiet --unit=nopen-v070-ublk \
+    --service-type=exec --collect \
+    --property=Restart=no \
+    --property=KillMode=control-group \
+    --property=OOMPolicy=continue \
+    --property=OOMScoreAdjust=-950 \
+    --property=LimitMEMLOCK=infinity \
+    --property="StandardOutput=append:$logfile" \
+    --property="StandardError=append:$logfile" \
+    --setenv=NOPEN_V070_KERNEL_SWAP_TEST=EXPERIMENTAL_GPU_SWAP_CAN_HANG \
+    --setenv=NOPEN_UBLK_BACKEND=opencl \
+    --setenv="NOPEN_V070_CAPACITY_MIB=$capacity" \
+    --setenv="NOPEN_UBLK_WORKER_BIN=$worker" \
+    "$target" add -t nopen-vram-swap-lab -n "$id" -q 1 -d 16 \
+      --max_io_buf_bytes 65536; then
+  echo "V070_START_FAILED could not launch independent root system service" >&2
+  rm -f "$state/pid" "$state/device" "$state/capacity"
+  exit 4
+fi
+server_pid="$(systemctl show "$service" --value --property=MainPID)"
 echo "$server_pid" > "$state/pid"
 ready=0
 for _ in $(seq 1 150); do
   if [[ -b "$dev" ]]; then ready=1; break; fi
-  if ! kill -0 "$server_pid" 2>/dev/null; then break; fi
+  if ! systemctl is-active --quiet "$service"; then break; fi
   sleep 0.1
 done
 if (( ! ready )); then
   echo "V070_START_FAILED kernel ublk device was not created" >&2
   tail -n 60 "$state/log" >&2
+  systemctl stop "$service" || true
   rm -f "$state/pid" "$state/device" "$state/capacity"
   exit 4
 fi
@@ -125,6 +153,7 @@ if ! timeout 10s dd if="$state/raw-test" of="$dev" bs=4096 count=4 \
    ! cmp "$state/raw-test" "$state/readback"; then
   echo "V070_START_FAILED GPU direct-I/O integrity failed; swap NOT enabled" >&2
   timeout 8s "$controller" del -n "$id" || true
+  systemctl stop "$service" || true
   rm -f "$state/pid" "$state/device" "$state/capacity"
   exit 5
 fi
@@ -132,6 +161,7 @@ mkswap -f "$dev" | tee "$state/mkswap.log"
 if ! swapon -p "$priority" "$dev"; then
   echo "V070_START_FAILED swapon rejected GPU device; leaving zram intact" >&2
   timeout 8s "$controller" del -n "$id" || true
+  systemctl stop "$service" || true
   rm -f "$state/pid" "$state/device" "$state/capacity"
   exit 6
 fi
@@ -140,5 +170,5 @@ if ! is_active; then
   echo "V070_START_FAILED no active kernel swap after swapon" >&2
   exit 7
 fi
-echo "V070_SWAP_ACTIVE device=$dev pool_mib=$capacity priority=$priority real_gpu=YES direct_io_verified=YES zram_untouched=YES"
+echo "V070_SWAP_ACTIVE device=$dev pool_mib=$capacity priority=$priority service=$service root_system_service=YES real_gpu=YES direct_io_verified=YES zram_untouched=YES"
 echo "To stop: sudo bash $repo/v070/tools/vram_swap_lab.sh stop"
