@@ -1,0 +1,208 @@
+#include "nopen_recovery.h"
+#include "nopen_page_core.h"
+#include <errno.h>
+#include <pthread.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define PAGE NOPEN_PAGE_SIZE
+#define MAX_IO NOPEN_BLK_MAX_BYTES
+#define MIB (1024u * 1024u)
+
+/* The CPU mirror is the authoritative, last-acknowledged state whenever
+ * mirror mode is enabled. This intentionally CANCELS any RAM savings.
+ * No GPU reset is attempted; the backing store is discarded on device loss.
+ * All public operations and state transitions serialize via a mutex. */
+struct nopen_recovery {
+    nopen_blk_backend *gpu;
+    unsigned char *mirror;
+    uint64_t *checksums;
+    unsigned char *scratch;
+    size_t pages;
+    nopen_backend backend;
+    nopen_recovery_mode mode;
+    nopen_recovery_stats stats;
+    pthread_mutex_t mutex;
+};
+
+static int bounds(const nopen_recovery *r,uint64_t off,size_t bytes) {
+    if(!r || !bytes || bytes>MAX_IO ||
+       (off%PAGE)!=0 || (bytes%PAGE)!=0 ||
+       off/PAGE >= r->pages || bytes/PAGE > r->pages-off/PAGE)
+        return -EINVAL;
+    return 0;
+}
+static void gpu_lost(nopen_recovery *r) {
+    if(r->stats.state!=NOPEN_RECOVERY_GPU_ACTIVE)return;
+    r->stats.device_loss_events++;
+    r->stats.state=r->mode==NOPEN_RECOVERY_HOST_MIRROR?
+        NOPEN_RECOVERY_CPU_FALLBACK:NOPEN_RECOVERY_FAILED_CLOSED;
+}
+static int check_mirror(nopen_recovery *r,size_t first,size_t count) {
+    for(size_t i=0;i<count;i++) {
+        const unsigned char *p=r->mirror+(first+i)*PAGE;
+        if(nopen_page_checksum(p,PAGE)!=r->checksums[first+i]) {
+            r->stats.integrity_failures++;
+            r->stats.state=NOPEN_RECOVERY_FAILED_CLOSED;
+            return -EIO;
+        }
+    }
+    return 0;
+}
+int nopen_recovery_open(nopen_recovery **out,nopen_backend backend,
+                        size_t capacity_mib,nopen_recovery_mode mode) {
+    if(!out)return -EINVAL;
+    *out=NULL;
+    if((backend!=NOPEN_STORE_OPENCL && backend!=NOPEN_STORE_MOCK) ||
+       (mode!=NOPEN_RECOVERY_NO_MIRROR && mode!=NOPEN_RECOVERY_HOST_MIRROR) ||
+       capacity_mib<4 || capacity_mib>64) return -EINVAL;
+    nopen_recovery *r=calloc(1,sizeof(*r));
+    if(!r)return -ENOMEM;
+    r->pages=capacity_mib*(MIB/PAGE);
+    r->backend=backend;
+    r->mode=mode;
+    r->stats.state=NOPEN_RECOVERY_GPU_ACTIVE;
+    r->scratch=malloc(MAX_IO);
+    if(mode==NOPEN_RECOVERY_HOST_MIRROR) {
+        /* Mirror is preallocated, never faulted in under GPU failure.
+         * Actual anonymous memory may be lazily committed, but every page is
+         * touched by calloc + the loop below before opening the GPU. */
+        r->mirror=calloc(r->pages,PAGE);
+        r->checksums=malloc(r->pages*sizeof(*r->checksums));
+        if(r->mirror && r->checksums) {
+            const unsigned char zero[PAGE]={0};
+            const uint64_t digest=nopen_page_checksum(zero,PAGE);
+            for(size_t i=0;i<r->pages;i++) {
+                r->mirror[i*PAGE]=0;
+                r->checksums[i]=digest;
+            }
+            r->stats.mirror_bytes=r->pages*PAGE;
+        }
+    }
+    if(!r->scratch ||
+       (mode==NOPEN_RECOVERY_HOST_MIRROR && (!r->mirror||!r->checksums))) {
+        free(r->checksums);free(r->mirror);free(r->scratch);free(r);
+        return -ENOMEM;
+    }
+    if(pthread_mutex_init(&r->mutex,NULL)!=0) {
+        free(r->checksums);free(r->mirror);free(r->scratch);free(r);
+        return -ENOMEM;
+    }
+    if(nopen_blk_open(&r->gpu,backend,capacity_mib)!=0) {
+        pthread_mutex_destroy(&r->mutex);
+        free(r->checksums);free(r->mirror);free(r->scratch);free(r);
+        return -EIO;
+    }
+    *out=r;
+    return 0;
+}
+int nopen_recovery_device_lost(nopen_recovery *r) {
+    if(!r)return -EINVAL;
+    pthread_mutex_lock(&r->mutex);
+    gpu_lost(r);
+    const int rc=r->stats.state==NOPEN_RECOVERY_FAILED_CLOSED?-EIO:0;
+    pthread_mutex_unlock(&r->mutex);
+    return rc;
+}
+int nopen_recovery_inject_io_failure(nopen_recovery *r,size_t operation) {
+    if(!r)return -EINVAL;
+    pthread_mutex_lock(&r->mutex);
+    if(r->backend!=NOPEN_STORE_MOCK ||
+       r->stats.state!=NOPEN_RECOVERY_GPU_ACTIVE) {
+        pthread_mutex_unlock(&r->mutex);
+        return -EPERM;
+    }
+    nopen_blk_inject_failure(r->gpu,operation);
+    pthread_mutex_unlock(&r->mutex);
+    return 0;
+}
+int nopen_recovery_read(nopen_recovery *r,uint64_t off,void *out,size_t len) {
+    if(!out || bounds(r,off,len)!=0)return -EINVAL;
+    pthread_mutex_lock(&r->mutex);
+    const size_t first=(size_t)(off/PAGE),count=len/PAGE;
+    if(r->stats.state==NOPEN_RECOVERY_FAILED_CLOSED) {
+        pthread_mutex_unlock(&r->mutex);
+        return -EIO;
+    }
+    int rc=0;
+    if(r->stats.state==NOPEN_RECOVERY_GPU_ACTIVE) {
+        rc=nopen_blk_read(r->gpu,off,r->scratch,len);
+        if(rc!=0) {
+            r->stats.gpu_read_errors++;
+            gpu_lost(r);
+        } else if(r->mirror && check_mirror(r,first,count)==0) {
+            /* Compare all bytes against last-acknowledged CPU mirror; even a
+             * valid GPU checksum is not proof it is the correct generation. */
+            if(memcmp(r->scratch,r->mirror+first*PAGE,len)!=0) {
+                r->stats.integrity_failures++;
+                gpu_lost(r);
+            }
+        } else if(r->mirror) {
+            /* Corrupt authoritative mirror means neither source is trusted. */
+            r->stats.state=NOPEN_RECOVERY_FAILED_CLOSED;
+        }
+    }
+    if(r->stats.state==NOPEN_RECOVERY_CPU_FALLBACK) {
+        if(check_mirror(r,first,count)==0) {
+            memcpy(r->scratch,r->mirror+first*PAGE,len);
+            r->stats.fallback_reads++;
+        }
+    }
+    if(r->stats.state==NOPEN_RECOVERY_FAILED_CLOSED)rc=-EIO;
+    else {memcpy(out,r->scratch,len);r->stats.reads++;rc=0;}
+    pthread_mutex_unlock(&r->mutex);
+    return rc;
+}
+int nopen_recovery_write(nopen_recovery *r,uint64_t off,const void *src,size_t len) {
+    if(!src || bounds(r,off,len)!=0)return -EINVAL;
+    pthread_mutex_lock(&r->mutex);
+    const size_t first=(size_t)(off/PAGE),count=len/PAGE;
+    if(r->stats.state==NOPEN_RECOVERY_FAILED_CLOSED) {
+        pthread_mutex_unlock(&r->mutex);
+        return -EIO;
+    }
+    int rc=0;
+    if(r->stats.state==NOPEN_RECOVERY_GPU_ACTIVE) {
+        rc=nopen_blk_write(r->gpu,off,src,len);
+        if(rc!=0) {
+            r->stats.gpu_write_errors++;
+            gpu_lost(r);
+        }
+    }
+    if(r->stats.state==NOPEN_RECOVERY_CPU_FALLBACK) {
+        /* CPU source remains authoritative. On failed GPU write, the new data
+         * can be ACKed only because the complete mirror exists and is checked.
+         * No use of GPU storage after this transition. */
+        if(check_mirror(r,first,count)!=0)rc=-EIO;
+        else {r->stats.fallback_writes++;rc=0;}
+    }
+    if(r->stats.state==NOPEN_RECOVERY_FAILED_CLOSED)rc=-EIO;
+    if(rc==0) {
+        if(r->mirror) {
+            memcpy(r->mirror+first*PAGE,src,len);
+            for(size_t i=0;i<count;i++)
+                r->checksums[first+i]=nopen_page_checksum(
+                    (const unsigned char *)src+i*PAGE,PAGE);
+        }
+        r->stats.writes++;
+    }
+    pthread_mutex_unlock(&r->mutex);
+    return rc;
+}
+int nopen_recovery_get_stats(nopen_recovery *r,nopen_recovery_stats *out) {
+    if(!r || !out)return -EINVAL;
+    pthread_mutex_lock(&r->mutex);
+    *out=r->stats;
+    pthread_mutex_unlock(&r->mutex);
+    return 0;
+}
+void nopen_recovery_close(nopen_recovery *r) {
+    if(!r)return;
+    pthread_mutex_lock(&r->mutex);
+    nopen_blk_close(r->gpu);
+    r->gpu=NULL;
+    pthread_mutex_unlock(&r->mutex);
+    pthread_mutex_destroy(&r->mutex);
+    free(r->checksums);free(r->mirror);free(r->scratch);free(r);
+}
