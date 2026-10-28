@@ -23,7 +23,7 @@ dest="${HOME}/nopen-v070-swap-failure-${stamp}.txt"
     grep -Ei 'swap-device|amdgpu.*(err|fault|reset|timeout)|ublk.*(err|fault|fail)|out of memory|oom.kill' |
     tail -n 200 || true
   printf '\n== persistent Nopen logs if present ==\n'
-  for f in /run/nopen-v070/log /var/log/nopen-v070/log; do
+  for f in /run/nopen-v070/log /var/log/nopen-v070/server-*.log; do
     if [[ -r "$f" ]]; then
       echo "=== $f ==="
       tail -n 400 "$f"
