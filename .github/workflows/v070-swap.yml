@@ -18,6 +18,7 @@ jobs:
           bash -n v070/tools/vram_swap_lab.sh
           bash -n v070/tools/test_swap_vm.sh
           bash -n v070/tools/build_ublk.sh
+          bash -n v070/tools/test_service_vm.sh
       - name: Confirm no unconsented swap or zram modification
         run: |
           python3 v070/tests/test_swap_policy.py v070/tools/vram_swap_lab.sh
@@ -59,6 +60,20 @@ jobs:
           sudo apt-get install -y autoconf automake libtool pkg-config g++ cmake \
             liburing-dev ocl-icd-opencl-dev opencl-headers util-linux
           bash v070/tools/build_ublk.sh
+      - name: Root systemd service cgroup outlives user login lifecycle
+        if: steps.ublk.outputs.available == 'true'
+        timeout-minutes: 3
+        run: |
+          bash -n v070/tools/test_service_vm.sh
+          if [[ -d /run/systemd/system ]]; then
+            sudo env GITHUB_ACTIONS=true NOPEN_ISOLATED_VM_TEST=I_ACKNOWLEDGE_DISPOSABLE_VM \
+              bash v070/tools/test_service_vm.sh \
+              "$GITHUB_WORKSPACE/build-v070/nopen-v070-ublk" \
+              "$GITHUB_WORKSPACE/build-v070/ublksrv-upstream/ublk" \
+              "$GITHUB_WORKSPACE/build-v070/v060/nopen-isolated-worker"
+          else
+            echo "SYSTEM_UNIT_VM_UNAVAILABLE no_systemd_init=YES"
+          fi
       - name: Actual disposable Linux ublk kernel swap activation + teardown
         if: steps.ublk.outputs.available == 'true'
         timeout-minutes: 4
