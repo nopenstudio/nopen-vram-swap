@@ -139,3 +139,15 @@ Başarı kaydı: `V070_SHADOW_HARDWARE_PASS all_pages_verified=YES read_after_wo
 **Not:** Eğer dosyanın tutulduğu bölüm `tmpfs` ise test reddedilir. Bu dosya gerçek NVMe/SSD üzerinde olmalıdır; RAM içindeki tmpfs ile test yapmak hatalı olur.
 
 Bu testin sonucu gerçek Radeon I/O'nun ve güvenilir disk fallback'in birlikte çalıştığını gösterir. **Kernel direct reclaim altında güvenli system-wide SWAP veya Bannerlord FPS kazanımını tek başına kanıtlamaz.**
+
+## 28 Ekim 2026 — Tam çekirdek SWAP-in + GPU işçisi ölümü regresyonu
+
+Önceki v0.7 hatası gerçekte `ublkb23` cihazının kernel SWAP yazma zaman aşımıyla başlıyordu. Ayrı bağımsız sistem servisi ve disk yedeğiyle bunu test etmek için `v070/tools/test_shadow_swap_vm.sh` eklendi ve **geçici GitHub sanal makinesinde çalıştırıldı**.
+
+- Gerçek Linux `/dev/ublkb27` aygıtı ve `swapon -p 200` etkinleştirildi; GPU backend açıkça **mock** seçildi ve veri için O_DIRECT SSD shadow kullanıldı.
+- 64MiB cgroup RAM sınırında uygulama 96MiB veri yazdı; Linux `/proc/swaps` üzerinde Nopen cihazında **41.432 KiB** swap kullanımını raporladı (`V070_PAGING_FAILOVER_SWAPIN_READY`).
+- Çalışma sırasında bağımsız GPU işçisi `SIGKILL` ile öldürüldü. Uygulama 96MiB/24.576 adet 4KiB bellek sayfasının tüm veri örüntüsünü **GPU işçisi öldükten sonra** yeniden doğruladı. DİKKAT: 24.576 sayfanın tümü swap'e taşınmadı; bu sayı uygulamanın kontrol ettiği toplam sayfalardır.
+- SSD shadow üzerinden fallback doğrulandı; `swapoff` başarılı oldu ve kernel `ublk` aygıtı kaldırıldı. Başarı kayıtları: `V070_PAGING_FAILOVER_PASS` ve `V070_PAGING_FAILOVER_PASS_AFTER_READ`.
+- Kanıt: https://github.com/nopenstudio/nopen-vram-swap/actions/runs/40751604294 — **38/38 CTest, 3/3 CI**.
+
+**Sınır:** Gerçek kernel SWAP ve reclaim yolu çalıştırıldı, ancak GPU backend **mock** idi. Gerçek RX 9060 XT'de 64MiB OpenCL + SSD shadow işçi kaybı testi daha önce başarılıydı (16.384/16.384 sayfa). Bu iki başarı birlikte fiziksel GPU destekli kernel SWAP'in düşük bellek baskısında kilitlenmeyeceğini veya oyun FPS'sini artıracağını henüz kanıtlamaz. Fiziksel `start` engeli şu anda yürürlüktedir.
