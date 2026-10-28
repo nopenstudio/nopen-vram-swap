@@ -115,3 +115,27 @@ Kernel ublk belgeleri: https://docs.kernel.org/block/ublk.html
 ### Fiziksel test kuralı
 
 `v070/tools/vram_swap_lab.sh start` komutu şu anda **BLOKE**. Önce CI'da canlı `ublk` worker-kill, sistem servisi ve kernel swap-off senaryoları başarıyla bitmeli; fiziksel Radeon altında SSD-shadow ve PSI baskı testleri ayrı kabul edilmeli. Blokajı kullanıcı test isteğine rağmen bilerek koruyoruz; aynı yedeksiz hata yolunu tekrar kullanmamak için. `status` ve `stop` korunmuştur. GitHub sorun kaydı: https://github.com/nopenstudio/nopen-vram-swap/issues/7
+
+## RX 9060 XT için güvenli kurtarma kabul testi (yeni)
+
+**Bu test gerçek AMD OpenCL kullanır ama kernel SWAP açmaz, GPU firmware'ini resetlemez, root/sudo istemez.** 64MiB veriyi bağımsız ext4/xfs NVMe dosyasında tutar, önce GPU yolundan yazıp okur, GPU işçi sürecini yalnızca yazılım düzeyinde sonlandırır ve bütün 16.384 sayfayı diskteki güvenilir kopyadan okur. Ölçülen gecikmeler SSD yazma maliyetini de içerir.
+
+~~~bash
+cd ~/nopen-v070
+git pull --ff-only
+cmake -S v070 -B build-v070 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+cmake --build build-v070 --parallel
+ctest --test-dir build-v070 --output-on-failure
+./build-v070/nopen-shadow-smoke \
+  --worker "$PWD/build-v070/v060/nopen-isolated-worker" \
+  --backend opencl --capacity-mib 64 \
+  --operations 1000 --loss-after 500 \
+  --shadow-file "$HOME/nopen-v070-hardware-shadow-64mib.bin" \
+  | tee "$HOME/nopen-v070-hardware-shadow.log"
+~~~
+
+Başarı kaydı: `V070_SHADOW_HARDWARE_PASS all_pages_verified=YES read_after_worker_loss=YES write_after_worker_loss=YES`. Test başarılıysa test dosyasını siler; hata alırsa tanılama için bırakır. Dosya zaten mevcutsa `O_EXCL` ile reddedilir, mevcut dosyanın üzerine yazmaz.
+
+**Not:** Eğer dosyanın tutulduğu bölüm `tmpfs` ise test reddedilir. Bu dosya gerçek NVMe/SSD üzerinde olmalıdır; RAM içindeki tmpfs ile test yapmak hatalı olur.
+
+Bu testin sonucu gerçek Radeon I/O'nun ve güvenilir disk fallback'in birlikte çalıştığını gösterir. **Kernel direct reclaim altında güvenli system-wide SWAP veya Bannerlord FPS kazanımını tek başına kanıtlamaz.**
