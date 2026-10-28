@@ -150,4 +150,5 @@ jobs:
         run: |
           sudo env GITHUB_ACTIONS=true NOPEN_ISOLATED_VM_TEST=I_ACKNOWLEDGE_DISPOSABLE_VM \
             bash v060/experimental/ublk/test_vm_kernel_lifecycle.sh \
-            /tmp/nopen-v060-ublk-recovery /tmp/ublksrv/ublk
+            /tmp/nopen-v060-ublk-recovery /tmp/ublksrv/ublk \
+            "$GITHUB_WORKSPACE/build-v060-kernel/nopen-isolated-worker"
