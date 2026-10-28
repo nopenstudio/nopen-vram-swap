@@ -1,3 +1,14 @@
+# ÖNEMLİ — v0.7 fiziksel kernel SWAP güvenlik engeli (28 Ekim 2026)
+
+**RX 9060 XT gerçek sistem SWAP testinde kernel `Read-error on swap-device` hataları görüldü ve sistem kullanılamaz duruma geldi. Fiziksel `start` komutu sonraki testler için kodda geçici olarak engellendi.** `stop` ve `status` komutları korunmuştur. Sorun çözülene kadar tekrar `swapon` çalıştırmayın.
+
+- Hata raporu: https://github.com/nopenstudio/nopen-vram-swap/issues/7
+- Yeniden başlatmadan sonra salt okunur tanılama: `git pull --ff-only && bash v070/tools/collect_swap_failure.sh`
+- Eski prototipin CI mock SWAP başarısı, gerçek AMDGPU altında swap-in veri kaybı güvenliğini kanıtlamadı.
+- Aşağıdaki fiziksel test talimatları **tarihsel referanstır; geçerli sürümde `start` bilerek reddedilir.**
+
+---
+
 # Nopen VRAM SWAP v0.7.0-dev — Gerçek Linux GPU SWAP ve Bannerlord deneyi
 
 **Durum: Deneysel GPU-backed kernel SWAP uygulaması. İlk kararlı sürüm v1.0.** Bu sürümde, v0.6 `ublk` + bağımsız `nopen-isolated-worker` gerçek OpenCL backend'ini seçili Linux SWAP cihazına bağlayabiliyor; geçmiş NBD sürücüsünü KULLANMIYOR.
