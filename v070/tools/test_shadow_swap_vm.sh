@@ -35,7 +35,14 @@ cleanup() {
   fi
   if (( group_created )); then rmdir "$cgroup" 2>/dev/null || true; fi
   if (( swap_active )); then
-    timeout --signal=TERM --kill-after=4s 35s swapoff "$dev" || true
+    if timeout --signal=TERM --kill-after=4s 35s swapoff "$dev"; then
+      swap_active=0
+    else
+      # Never remove the storage/daemon while Linux still references its
+      # swap pages. The GitHub disposable VM is destroyed after the job.
+      echo "V070_PAGING_FAILOVER_CLEANUP_FAILED swapoff=FAILED device_and_shadow_PRESERVED=YES" >&2
+      return
+    fi
   fi
   if (( created )); then
     timeout --signal=TERM --kill-after=3s 15s "$ctl" del -n "$id" || true
