@@ -11,3 +11,8 @@ add_test(NAME v070_swap_controller_command_gate
  "${CMAKE_CURRENT_LIST_DIR}/tools/vram_swap_lab.sh")
 set_tests_properties(v070_swap_controller_command_gate PROPERTIES
  PASS_REGULAR_EXPRESSION "V070_GATE_PASS" TIMEOUT 15)
+
+add_test(NAME v070_bannerlord_swap_proof_and_comparison
+ COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/tests/test_game_comparison.py")
+set_tests_properties(v070_bannerlord_swap_proof_and_comparison PROPERTIES
+ PASS_REGULAR_EXPRESSION "GAME_COMPARE_TEST_PASS" TIMEOUT 10)
