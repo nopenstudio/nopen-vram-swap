@@ -33,6 +33,16 @@ with tempfile.TemporaryDirectory() as td:
     x=folder/"frames.csv"
     x.write_text("10\n"*200)
     assert frametimes(x)["average_fps"]==100
+    mh=folder/"mangohud.csv"
+    # Replace with valid 200 per-frame MangoHud rows, not sampled averages.
+    mh.write_text("os,cpu,gpu\nGaruda,Ryzen,Radeon\nfps,frametime,cpu_load\n"+
+                  "100,10,20\n"*200)
+    assert frametimes(mh)["frames"]==200
+    assert frametimes(mh)["average_fps"]==100
+    report=compute(rows(off,"off"),rows(on,"on"),x,mh)
+    assert report["observed_avg_fps_delta"]==0
+    assert report["fps_speedup_observed"] is False
+    assert report["fps_speedup_proven"] is False
     fake(on,"off",100)
     try:rows(on,"on")
     except ValueError:pass
