@@ -16,7 +16,16 @@ add_test(NAME v070_durable_disk_shadow_survives_gpu_worker_timeout
   COMMAND nopen-test-shadow $<TARGET_FILE:nopen-isolated-worker>)
 set_tests_properties(v070_durable_disk_shadow_survives_gpu_worker_timeout
   PROPERTIES PASS_REGULAR_EXPRESSION "V070_SHADOW_TEST_PASS" TIMEOUT 30)
+add_executable(nopen-shadow-smoke src/nopen_shadow_smoke.c)
+target_link_libraries(nopen-shadow-smoke PRIVATE nopen_shadow)
+target_compile_options(nopen-shadow-smoke PRIVATE -Wall -Wextra -Wpedantic -Werror)
 enable_testing()
+add_test(NAME v070_mock_shadow_hardware_probe
+ COMMAND nopen-shadow-smoke --worker $<TARGET_FILE:nopen-isolated-worker>
+  --backend mock --capacity-mib 4 --operations 500 --loss-after 250
+  --shadow-file "${CMAKE_CURRENT_BINARY_DIR}/nopen-v070-smoke-shadow.bin")
+set_tests_properties(v070_mock_shadow_hardware_probe PROPERTIES
+ PASS_REGULAR_EXPRESSION "V070_SHADOW_HARDWARE_PASS" TIMEOUT 30)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME v070_swap_controller_command_gate
  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/tests/test_swap_policy.py"
