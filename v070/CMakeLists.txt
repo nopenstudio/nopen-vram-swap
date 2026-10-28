@@ -4,6 +4,17 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 option(NOPEN_OPENCL "Require real AMD OpenCL support for the GPU SWAP backend" ON)
 add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../v060" "${CMAKE_CURRENT_BINARY_DIR}/v060")
+add_library(nopen_shadow STATIC src/nopen_shadow.c)
+target_include_directories(nopen_shadow PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
+target_link_libraries(nopen_shadow PUBLIC nopen_isolated_io nopen_page_core Threads::Threads)
+target_compile_options(nopen_shadow PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_executable(nopen-test-shadow tests/test_shadow.c)
+target_link_libraries(nopen-test-shadow PRIVATE nopen_shadow)
+target_compile_options(nopen-test-shadow PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_test(NAME v070_durable_disk_shadow_survives_gpu_worker_timeout
+  COMMAND nopen-test-shadow $<TARGET_FILE:nopen-isolated-worker>)
+set_tests_properties(v070_durable_disk_shadow_survives_gpu_worker_timeout
+  PROPERTIES PASS_REGULAR_EXPRESSION "V070_SHADOW_TEST_PASS" TIMEOUT 30)
 enable_testing()
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME v070_swap_controller_command_gate
