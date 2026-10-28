@@ -45,10 +45,36 @@ def avg(data:list[dict],key:str)->float|None:
     return round(statistics.mean(vals),2) if vals else None
 
 def frametimes(path:Path)->dict:
+    """Accept simple numeric frametime_ms OR raw MangoHud CSV (fps,frametime,...).
+
+    MangoHud headers may start after system metadata rows. Require every frame
+    log_interval=0 in MangoHud for true frame-based 1% low statistics.
+    """
+    values=[]
+    index=None
     with path.open(newline="",encoding="utf-8") as fp:
-        values=[float(row[0]) for row in csv.reader(fp) if row]
+        for row in csv.reader(fp):
+            if not row:continue
+            names=[cell.strip().lower() for cell in row]
+            if index is None and "frametime" in names:
+                index=names.index("frametime")
+                values=[]
+                continue
+            if index is not None:
+                if len(row)<=index:
+                    raise ValueError(f"{path}: malformed MangoHud CSV frame row")
+                try:
+                    values.append(float(row[index]))
+                except ValueError as exc:
+                    raise ValueError(f"{path}: invalid MangoHud frametime row") from exc
+            elif len(row)==1:
+                try:
+                    values.append(float(row[0]))
+                except ValueError:
+                    # Header/metadata before MangoHud fps,frametime,... block.
+                    pass
     if len(values)<100 or not all(math.isfinite(x) and x>0 for x in values):
-        raise ValueError(f"{path}: require >=100 positive frame-time ms numbers")
+        raise ValueError(f"{path}: require >=100 positive frame-time ms values")
     slowest=sorted(values,reverse=True)[:max(1,math.ceil(len(values)*.01))]
     return {"frames":len(values),"average_fps":round(1000/statistics.mean(values),2),
             "one_percent_low_fps":round(1000/statistics.mean(slowest),2),
@@ -79,8 +105,14 @@ def compute(off:list[dict],on:list[dict],
     }
     if off_frames and on_frames:
         report["frametimes"]={"off":frametimes(off_frames),"on":frametimes(on_frames)}
-        report["fps_speedup_proven"]=True if report["frametimes"]["on"]["average_fps"]>report["frametimes"]["off"]["average_fps"] else False
-        report["notes"]+=" Even FPS association alone does not prove causality."
+        before=report["frametimes"]["off"]
+        after=report["frametimes"]["on"]
+        report["observed_avg_fps_delta"]=round(after["average_fps"]-before["average_fps"],2)
+        report["observed_1pct_low_fps_delta"]=round(after["one_percent_low_fps"]-before["one_percent_low_fps"],2)
+        # A single A/B difference is measured, not a causal improvement proof.
+        report["fps_speedup_observed"]=report["observed_avg_fps_delta"]>0
+        report["fps_speedup_proven"]=False
+        report["notes"]+=" A single A/B comparison is not causal proof: repeat A/B/A or multiple controlled runs."
     return report
 
 def main()->int:
