@@ -10,6 +10,8 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/statfs.h>
+#include <sys/ioctl.h>
+#include <linux/fs.h>
 #include <unistd.h>
 
 #ifndef O_DIRECT
@@ -20,6 +22,7 @@
 #define MIB (1024u*1024u)
 /* Linux tmpfs is not a durable independent store. */
 #define TMPFS_SUPER_MAGIC 0x01021994L
+#define BTRFS_SUPER_MAGIC 0x9123683eL
 struct nopen_shadow {
     nopen_isolated_io *gpu;
     int fd;
@@ -97,6 +100,33 @@ int nopen_shadow_open(nopen_shadow **out,nopen_backend backend,
                        " independent_storage_required=YES path=%s\n",path);
         errno=EOPNOTSUPP;
         goto open_error;
+    }
+    if(fs.f_type==BTRFS_SUPER_MAGIC) {
+        /* Btrfs normally COWs overwritten extents. That is unacceptable for
+         * the GPU worker's disk backing while Linux is reclaiming memory:
+         * set NOCOW on the NEW empty O_EXCL inode before fallocate or data.
+         * An isolated, non-snapshotted subvolume must be set up by caller.
+         */
+        struct stat st;
+        int flags=0,checked=0;
+        if(fstat(s->fd,&st)!=0 || !S_ISREG(st.st_mode) ||
+           st.st_size!=0 || st.st_nlink!=1 ||
+           ioctl(s->fd,FS_IOC_GETFLAGS,&flags)!=0) {
+            errno=EOPNOTSUPP;
+            goto open_error;
+        }
+        flags |= FS_NOCOW_FL;
+        if(ioctl(s->fd,FS_IOC_SETFLAGS,&flags)!=0 ||
+           ioctl(s->fd,FS_IOC_GETFLAGS,&checked)!=0 ||
+           !(checked & FS_NOCOW_FL) || (checked & FS_COMPR_FL)) {
+            fprintf(stderr,"NOPEN_SHADOW_REFUSED reason=btrfs_nocow_missing"
+                           " path=%s\n",path);
+            errno=EOPNOTSUPP;
+            goto open_error;
+        }
+        fprintf(stderr,"NOPEN_SHADOW_BTRFS_NOCOW_VERIFIED path=%s"
+                       " empty_inode_before_allocation=YES"
+                       " snapshots_must_be_disabled=YES\n",path);
     }
     const int allocation_rc=posix_fallocate(s->fd,0,(off_t)(mib*MIB));
     if(allocation_rc!=0) {
