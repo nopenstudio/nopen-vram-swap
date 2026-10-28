@@ -19,8 +19,8 @@ fi
 if grep -Eq '^/dev/(nbd|ublkb)' /proc/swaps; then
   echo "UBLK_LIFECYCLE_REFUSED potentially dangerous active test swap" >&2; exit 2
 fi
-device_id=1791
-device="/dev/ublkb1791"
+device_id=23
+device="/dev/ublkb23"
 [[ ! -e "$device" ]] || { echo "UBLK_LIFECYCLE_REFUSED device collision" >&2; exit 2; }
 work="$(mktemp -d)"
 created=0
