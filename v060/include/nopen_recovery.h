@@ -37,6 +37,13 @@ typedef struct {
  */
 int nopen_recovery_open(nopen_recovery **out,nopen_backend backend,
                         size_t capacity_mib,nopen_recovery_mode mode);
+/* Caller-supplied total host-allocation budget, counted conservatively:
+ * mirror, checksums, scratch and wrapper metadata. Returns -ENOMEM BEFORE
+ * GPU initialization if impossible; does not change system memory limits.
+ * The OpenCL runtime/driver allocations are outside this known budget. */
+int nopen_recovery_open_bounded(nopen_recovery **out,nopen_backend backend,
+                        size_t capacity_mib,nopen_recovery_mode mode,
+                        size_t max_host_bytes);
 int nopen_recovery_read(nopen_recovery *r,uint64_t offset,void *dst,size_t bytes);
 int nopen_recovery_write(nopen_recovery *r,uint64_t offset,const void *src,size_t bytes);
 
