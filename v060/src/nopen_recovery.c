@@ -50,13 +50,22 @@ static int check_mirror(nopen_recovery *r,size_t first,size_t count) {
     }
     return 0;
 }
-int nopen_recovery_open(nopen_recovery **out,nopen_backend backend,
-                        size_t capacity_mib,nopen_recovery_mode mode) {
+int nopen_recovery_open_bounded(nopen_recovery **out,nopen_backend backend,
+                        size_t capacity_mib,nopen_recovery_mode mode,
+                        size_t max_host_bytes) {
     if(!out)return -EINVAL;
     *out=NULL;
     if((backend!=NOPEN_STORE_OPENCL && backend!=NOPEN_STORE_MOCK) ||
        (mode!=NOPEN_RECOVERY_NO_MIRROR && mode!=NOPEN_RECOVERY_HOST_MIRROR) ||
        capacity_mib<4 || capacity_mib>64) return -EINVAL;
+    const size_t page_count=capacity_mib*(MIB/PAGE);
+    const size_t mirror_bytes=mode==NOPEN_RECOVERY_HOST_MIRROR?
+        page_count*PAGE:0;
+    const size_t checksum_bytes=mode==NOPEN_RECOVERY_HOST_MIRROR?
+        page_count*sizeof(uint64_t):0;
+    const size_t known_budget=sizeof(nopen_recovery)+MAX_IO+
+        mirror_bytes+checksum_bytes;
+    if(known_budget>max_host_bytes)return -ENOMEM;
     nopen_recovery *r=calloc(1,sizeof(*r));
     if(!r)return -ENOMEM;
     r->pages=capacity_mib*(MIB/PAGE);
@@ -96,6 +105,11 @@ int nopen_recovery_open(nopen_recovery **out,nopen_backend backend,
     }
     *out=r;
     return 0;
+}
+
+int nopen_recovery_open(nopen_recovery **out,nopen_backend backend,
+                        size_t capacity_mib,nopen_recovery_mode mode) {
+    return nopen_recovery_open_bounded(out,backend,capacity_mib,mode,SIZE_MAX);
 }
 int nopen_recovery_device_lost(nopen_recovery *r) {
     if(!r)return -EINVAL;
