@@ -1,3 +1,83 @@
+# v0.7 Bannerlord gerçek oyun karşılaştırması (28 Ekim 2026)
+
+**Fiziksel AMD RX 9060 XT kabul kanıtı:** Kullanıcının Garuda Linux 7.2.11-zen1-1-zen makinesinde Btrfs NOCOW + OpenCL SSD-shadow 64MiB pilotu başarıyla gerçek kernel SWAP'e açıldı. /dev/ublkb23 üzerinde **32936 KiB** swap kullanımı görüldü, test uygulaması 28672 x 4KiB bellek sayfasını doğru doğruladı, swapoff ve aygıt kaldırma başarılı oldu; /dev/zram0 aktif kaldı. Bu 28672 sayfanın tümünün SWAP'e taşındığı anlamına gelmez.
+
+**Sıradaki hedef:** v0.7'yi bu başarıyla kapatıp doğrudan v0.8'e atlamak yerine gerçek Bannerlord'da tek sahnede **A/B (Nopen kapalı/açık)** RAM, VRAM, FPS ve 1% low karşılaştırması. 64MiB SWAP kapasitesi küçük olduğundan anlamlı hız artışı garanti değildir; GPU ile SSD yedeği her WRITE'i diske de yazdığı için sistem yavaşlayabilir. Aynı grafik ayarları, çözünürlük, kayıt dosyası, mod listesi ve oyun sahnesini kullan. 120 saniyelik bölümü iki kez mümkün olduğunca aynı hareketlerle tekrarla.
+
+## A — yalnızca ZRAM, Nopen kapalı
+
+~~~bash
+cd ~/nopen-v070
+git pull --ff-only
+cmake -S v070 -B build-v070 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+cmake --build build-v070 --parallel
+ctest --test-dir build-v070 --output-on-failure
+swapon --show
+mkdir -p "$HOME/nopen-bannerlord-bench"
+~~~
+
+Bu aşamada oyun Steam/Proton ile başlatılır ve doğrudan oynanış sahnesine girilir. Sadece launcher açıkken ölçümü başlatma. Gerçek oyun PID tespitçisi:
+
+~~~bash
+python3 v070/tools/find_bannerlord.py
+python3 v070/tools/game_probe.py --mode off --pid auto \
+  --duration-seconds 120 --csv "$HOME/nopen-bannerlord-bench/off.csv"
+~~~
+
+## B — Nopen 64MiB pilot açık
+
+Oyunu kapat, sonra Nopen'ın normal kullanıcı oturumundan bağımsız systemd servisinde çalışan pilotunu etkinleştir. **Risk:** Fiziksel kernel/AMDGPU kilitlenmesi tekrar yaşanabilir; bu test canlı SWAP kullanır. `start-pilot 64` kapsamını 256MiB/1024MiB'ye çıkarmayın.
+
+~~~bash
+sudo env NOPEN_V070_PILOT_ACK=I_ACCEPT_64MIB_KERNEL_GPU_SWAP_RISK \
+  bash v070/tools/vram_swap_lab.sh start-pilot 64
+swapon --show
+~~~
+
+Yalnızca `V070_SWAP_ACTIVE` görürsen oyunu yeniden başlat; aynı kayıt/sahne/ayarlar ile:
+
+~~~bash
+python3 v070/tools/find_bannerlord.py
+python3 v070/tools/game_probe.py --mode on --pid auto \
+  --duration-seconds 120 --csv "$HOME/nopen-bannerlord-bench/on.csv"
+~~~
+
+Oyun kapatıldıktan sonra pilotu SWAP içinde aktif sayfalar bırakmadan kapat:
+
+~~~bash
+sudo bash v070/tools/vram_swap_lab.sh stop
+python3 v070/tools/compare_game.py \
+  --off "$HOME/nopen-bannerlord-bench/off.csv" \
+  --on "$HOME/nopen-bannerlord-bench/on.csv" \
+  --json "$HOME/nopen-bannerlord-bench/report.json"
+~~~
+
+Rapor, /proc/swaps'taki gerçek Nopen SWAP kullanımını **sistem genelinde** gösterir; belirli sayfaların Bannerlord'a ait olduğunu göstermez. RSS değerleri süreç ağacında paylaşılan sayfaları çift sayabilir. En az bir kez A/B/A tekrarı, CPU/GPU yükü ve frame-time verisi gerekir; ham FPS artışı tek başına nedensellik ispatı değildir.
+
+## İsteğe bağlı MangoHud FPS ve 1% low kaydı
+
+MangoHud'un resmi kullanımında `output_folder` ayarlanır, `Shift_L+F2` ile FPS logu açılıp kapatılır. `log_interval=0` tam kare-zamanı ölçümü için tercih edilmelidir; örnekleme periyodu büyükse 1% low hesabı güvenilir değildir.
+
+Steam Bannerlord başlatma seçenekleri (MangoHud yüklüyse):
+
+~~~text
+MANGOHUD_CONFIG=output_folder=/home/seyit/nopen-bannerlord-bench,log_interval=0 mangohud %command%
+~~~
+
+Her koşulda MangoHud'un tuşuyla aynı 120 saniyelik bölüm kaydedilir. Üretilen MangoHud CSV'lerinden Nopen kapalı olanı `off_mangohud.csv`, açık olanı `on_mangohud.csv` olarak yeniden adlandır ve rapora ekle:
+
+~~~bash
+python3 v070/tools/compare_game.py \
+  --off "$HOME/nopen-bannerlord-bench/off.csv" \
+  --on "$HOME/nopen-bannerlord-bench/on.csv" \
+  --frametime-off "$HOME/nopen-bannerlord-bench/off_mangohud.csv" \
+  --frametime-on "$HOME/nopen-bannerlord-bench/on_mangohud.csv" \
+  --json "$HOME/nopen-bannerlord-bench/report-with-fps.json"
+~~~
+
+`compare_game.py` gerçek MangoHud `fps,frametime,...` başlığını ve üstündeki metadata satırlarını tanıyabilir. Yalnızca `frametime_ms` değerleri içeren eski tek sütunlu CSV de kabul edilir. Tek A/B deneyinden nedensel FPS hızlanması iddiası yapılamaz.
+
+---
 # Btrfs SSD yedeği desteği — 28 Ekim 2026
 
 Garuda Btrfs üzerinde 64MiB fiziksel pilotun eski sürümde verdiği `V070_REFUSED SSD shadow filesystem btrfs not approved` hatası giderildi. **Bu hata veri aktarımından değil, dosya sistemi izin listesinden kaynaklandı.**
