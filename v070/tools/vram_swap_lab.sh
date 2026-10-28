@@ -55,6 +55,16 @@ if [[ "$action" == stop ]]; then
   rm -f "$state/pid" "$state/device" "$state/capacity"
   exit 0
 fi
+# Known blocking defect: actual RX 9060 XT live kernel swap-in failed with
+# repeated "Read-error on swap-device" and apparent system lockup.
+# Do not re-enable host SWAP until lossless recovery/forward progress is fixed.
+# STOP and STATUS remain usable to recover a still-running experiment.
+if [[ "$action" == start ]]; then
+  echo "V070_START_BLOCKED known physical GPU SWAP page-in failure (GitHub issue #7)." >&2
+  echo "Read-only diagnostics: bash v070/tools/collect_swap_failure.sh" >&2
+  echo "Do not restart kernel SWAP until new implementation passes failure recovery gates." >&2
+  exit 9
+fi
 [[ "$capacity" =~ ^(64|256|1024|2048|4096)$ ]] || { usage; exit 2; }
 [[ -x "$target" && -x "$controller" && -x "$worker" ]] ||
   { echo "V070_REFUSED run bash v070/tools/build_ublk.sh first" >&2; exit 2; }
