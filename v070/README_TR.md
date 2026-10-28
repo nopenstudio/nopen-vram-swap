@@ -8,6 +8,22 @@ Garuda Btrfs üzerinde 64MiB fiziksel pilotun eski sürümde verdiği `V070_REFU
 - Btrfs üzerindeki gerçek `NOCOW` dosyasıyla 1.024 sayfalık mock GPU hata/kurtarma testi ve üst alt birim snapshot'ının veri yalıtımı GitHub'ın geçici Btrfs test makinesinde doğrulandı. Ayrıca **gerçek çekirdek SWAP-in/out + işçi ölümü** senaryosu Btrfs yedeği üzerinde ayrı CI testine eklendi; yalnızca CI başarı kaydı varsa geçtiği kabul edilir.
 - **Kalan risk:** Btrfs NOCOW, kernel'in doğrudan bellek geri kazanımı sırasında disk I/O ve AMDGPU'nun kilitlenmeyeceğini kanıtlamaz. Dosya sistemi metaverisi, kullanıcı alanındaki Nopen servisi ve OpenCL hâlâ çekirdeğin reclaim yolu üzerinde çalışır. Genel `start` blokajı sürmektedir; yalnızca açık izinle 64MiB `start-pilot` kullanılabilir.
 
+**Btrfs kernel SWAP tekrar testi (CI 40757059196):** yeni Btrfs NOCOW dosyasıyla gerçek `/dev/ublkb27` swap cihazı üç ardışık sefer çalıştırıldı. Üçünde de GPU mock işçisi `SIGKILL` sonrası cgroup belleği doğru doğrulandı ve `swapoff`/`ublk del` başarıyla bitti. Btrfs dosya testi, parent-snapshot dışlanması, 38/38 regresyon ve 3/3 CI başarılı. İki önceki Btrfs kernel denemesi başarısız olduğu için **kararsızlık riski tamamen ortadan kalktı denemez**; gerçek RX 9060 XT + Btrfs + kernel reclaim hâlâ ayrı deneydir. [CI](https://github.com/nopenstudio/nopen-vram-swap/actions/runs/40757059196).
+
+Gerçek Garuda Btrfs üzerinde SWAP açmadan önce yeni NOCOW mekanizmasını OpenCL ile sınayın:
+
+~~~bash
+cd ~/nopen-v070
+git pull --ff-only
+bash v070/tools/build_ublk.sh
+ctest --test-dir build-v070 --output-on-failure
+./build-v070/nopen-shadow-smoke \
+  --worker "$PWD/build-v070/v060/nopen-isolated-worker" \
+  --backend opencl --capacity-mib 64 --operations 1000 --loss-after 500 \
+  --shadow-file "$HOME/nopen-v070-btrfs-nocow-64mib.bin"
+~~~
+
+Başarı için hem `NOPEN_SHADOW_BTRFS_NOCOW_VERIFIED` hem `V070_SHADOW_HARDWARE_PASS` görülmelidir. Bu test `swapon` yapmaz. Ancak bu iki kanıttan sonra 64 MiB `start-pilot` denenmelidir.
 Önerilen sıra (kaynak güncellendikten, derleme ve testler geçtikten sonra):
 
 ~~~bash
