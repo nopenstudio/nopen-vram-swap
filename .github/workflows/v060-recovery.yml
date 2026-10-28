@@ -127,6 +127,7 @@ jobs:
           cd /tmp/ublksrv
           autoreconf -fi
           ./configure --without-libnfs --without-libiscsi --without-gnutls
+          make -C lib -j2
           make -j2 ublk
           cd "$GITHUB_WORKSPACE"
           cmake -S v060 -B build-v060-kernel -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
