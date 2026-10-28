@@ -55,6 +55,8 @@ void nopen_recovery_close(nopen_recovery *r);
 
 /* TEST INJECTION ONLY. For MOCK backend; never triggers actual GPU reset. */
 int nopen_recovery_inject_io_failure(nopen_recovery *r,size_t next_operation);
+/* MOCK-only diagnostic: corrupt authoritative CPU mirror for checksum tests. */
+int nopen_recovery_inject_mirror_corruption(nopen_recovery *r,size_t page);
 #ifdef __cplusplus
 }
 #endif
