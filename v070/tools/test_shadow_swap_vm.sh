@@ -36,10 +36,12 @@ if [[ -n "${NOPEN_V070_SHADOW_TEST_DIR:-}" ]]; then
   [[ ! -e "$shadow" ]] || exit 2
 fi
 daemon=0;pressure=0;created=0;swap_active=0;group_created=0
+phase=init
 cleanup() {
   if (( pressure>0 )); then
     kill "$pressure" 2>/dev/null || true
-    wait "$pressure" 2>/dev/null || true
+    phase=wait_pressure
+wait "$pressure" 2>/dev/null || true
   fi
   if (( group_created )); then rmdir "$cgroup" 2>/dev/null || true; fi
   if (( swap_active )); then
@@ -61,7 +63,22 @@ cleanup() {
   fi
   rm -rf "$dir"
 }
-trap cleanup EXIT
+finish() {
+  rc=$?
+  if (( rc != 0 )); then
+    echo "V070_PAGING_FAILOVER_DIAG rc=$rc phase=$phase" >&2
+    [[ ! -f "$dir/pressure.log" ]] || { echo "--- pressure child ---" >&2; tail -n 80 "$dir/pressure.log" >&2; }
+    [[ ! -f "$dir/ublk.log" ]] || { echo "--- ublk server ---" >&2; tail -n 80 "$dir/ublk.log" >&2; }
+    if [[ -f /sys/fs/cgroup/memory.events ]]; then
+      cat /sys/fs/cgroup/memory.events >&2 || true
+    fi
+    if command -v journalctl >/dev/null; then
+      journalctl -k --no-pager -n 50 >&2 || true
+    fi
+  fi
+  cleanup
+}
+trap finish EXIT
 NOPEN_UBLK_ISOLATED_LAB=EXPERIMENTAL_BLOCK_IO_NOT_SWAP \
 NOPEN_UBLK_BACKEND=mock NOPEN_V070_CAPACITY_MIB=64 \
 NOPEN_UBLK_WORKER_BIN="$worker" NOPEN_UBLK_SHADOW_FILE="$shadow" \
@@ -80,10 +97,13 @@ if [[ ! -b "$dev" ]]; then
   exit 3
 fi
 [[ -s "$shadow" ]] || { echo "V070_PAGING_FAILOVER_FAILED empty disk shadow" >&2; exit 3; }
+phase=mkswap
 mkswap -f "$dev" >"$dir/mkswap.log"
+phase=swapon
 swapon -p 200 "$dev"
 swap_active=1
 swapon --noheadings --raw --show=NAME | grep -Fxq "$dev"
+phase=cgroup
 mkdir "$cgroup"
 group_created=1
 printf '%s\n' $((64*1024*1024)) > "$cgroup/memory.max"
@@ -118,6 +138,7 @@ bash -c 'while [[ ! -e "$1" ]]; do sleep 0.01; done; exec python3 "$2" "$3" "$4"
   >"$dir/pressure.log" 2>&1 &
 pressure=$!
 echo "$pressure" > "$cgroup/cgroup.procs"
+phase=start_pressure
 touch "$dir/begin"
 for _ in $(seq 1 250); do
   [[ -f "$dir/ready" ]] && break
@@ -140,6 +161,7 @@ if ((used==0)); then
   echo "V070_PAGING_FAILOVER_FAILED no Nopen swap pages observed" >&2
   cat "$dir/pressure.log" >&2; exit 5
 fi
+phase=inject_worker
 echo "V070_PAGING_FAILOVER_SWAPIN_READY kernel_swap_used_kib=$used real_kernel_swap=YES"
 child="$(pgrep -P "$daemon" -f "nopen-isolated-worker" | head -n 1 || true)"
 [[ "$child" =~ ^[0-9]+$ ]] || {
@@ -147,6 +169,7 @@ child="$(pgrep -P "$daemon" -f "nopen-isolated-worker" | head -n 1 || true)"
 }
 kill -9 "$child"
 echo "V070_PAGING_FAILOVER_INJECT worker_sigkill=YES kernel_swap_still_active=YES"
+phase=swapin
 touch "$dir/verify-now"
 for _ in $(seq 1 400); do
   [[ -f "$dir/verified" ]] && break
@@ -159,17 +182,22 @@ if [[ ! -f "$dir/verified" ]]; then
   tail -n 120 "$dir/ublk.log" >&2
   exit 6
 fi
+phase=verify_data
 grep -Fxq VERIFIED_ALL_24576_PAGES "$dir/verified"
 wait "$pressure"
 pressure=0
+phase=check_fallback
 grep -q NOPEN_SHADOW_FAILOVER "$dir/ublk.log" || {
   echo "V070_PAGING_FAILOVER_FAILED expected SSD fallback missing" >&2; exit 7;
 }
+phase=swapoff
 timeout 35s swapoff "$dev"
 swap_active=0
+phase=remove_device
 timeout 15s "$ctl" del -n "$id"
 created=0
 [[ ! -e "$dev" ]] || exit 8
+phase=cleanup_cgroup
 rmdir "$cgroup";group_created=0
 # Only unlink after successful swapoff and deletion of the kernel device.
 if [[ "$shadow" != "$dir/"* ]]; then rm -f -- "$shadow"; fi
