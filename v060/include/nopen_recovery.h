@@ -27,6 +27,7 @@ typedef struct {
     uint64_t gpu_read_errors, gpu_write_errors;
     uint64_t device_loss_events, fallback_reads, fallback_writes;
     uint64_t integrity_failures;
+    uint64_t rebuild_attempts, rebuild_successes, rebuild_failures, rebuild_verified_pages;
     uint64_t mirror_bytes;
     nopen_recovery_state state;
 } nopen_recovery_stats;
@@ -50,6 +51,19 @@ int nopen_recovery_write(nopen_recovery *r,uint64_t offset,const void *src,size_
 /* Device-loss notification: default --> FAILED_CLOSED;
  * HOST_MIRROR --> CPU_FALLBACK (RAM authoritative), no GPU retries. */
 int nopen_recovery_device_lost(nopen_recovery *r);
+/* Manually rebuild a NEW GPU allocation from the authoritative full CPU mirror
+ * after a notified loss. A fresh backend is 4KiB page-written and independently
+ * read/verified before activation (two-phase fail-closed commit). In NO_MIRROR
+ * mode rebuild is impossible; fail closed. It is NOT hardware reset recovery
+ * across process death, not a production kernel swap recovery contract.
+ * A hung vendor driver/open/close can still block the calling process.
+ */
+int nopen_recovery_rebuild_gpu(nopen_recovery *r);
+
+/* MOCK-only negative path: fail the pending rebuild after this many pages.
+ * Used to ensure CPU fallback remains authoritative under partial repair. */
+int nopen_recovery_inject_rebuild_failure(nopen_recovery *r,size_t pages);
+
 int nopen_recovery_get_stats(nopen_recovery *r,nopen_recovery_stats *out);
 void nopen_recovery_close(nopen_recovery *r);
 
