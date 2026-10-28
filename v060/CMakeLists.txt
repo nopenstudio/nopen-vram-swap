@@ -23,7 +23,7 @@ target_link_libraries(nopen-test-rebuild PRIVATE nopen_recovery Threads::Threads
 target_compile_options(nopen-test-rebuild PRIVATE -Wall -Wextra -Wpedantic -Werror)
 add_library(nopen_isolated_io STATIC src/nopen_isolated_io.c)
 target_include_directories(nopen_isolated_io PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
-target_link_libraries(nopen_isolated_io PUBLIC nopen_page_core Threads::Threads)
+target_link_libraries(nopen_isolated_io PUBLIC nopen_page_core nopen_blk_backend Threads::Threads)
 target_compile_options(nopen_isolated_io PRIVATE -Wall -Wextra -Wpedantic -Werror)
 add_executable(nopen-isolated-worker src/nopen_isolated_worker.c)
 target_link_libraries(nopen-isolated-worker PRIVATE nopen_blk_backend nopen_page_core)
