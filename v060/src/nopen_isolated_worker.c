@@ -96,7 +96,7 @@ int main(int argc,char **argv) {
             fprintf(stderr,
               "NOPEN_WORKER_IO_FATAL backend=%s op=%s"
               " offset=%" PRIu64 " bytes=%u errno=%d"
-              " backend_error=%s failed_page_recovery=NO\\n",
+              " backend_error=%s failed_page_recovery=NO\n",
               backend==NOPEN_STORE_OPENCL?"opencl":"mock",
               msg.op==NOPEN_IPC_READ?"READ":"WRITE",
               msg.offset,msg.bytes,-status,
