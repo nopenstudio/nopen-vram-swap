@@ -19,6 +19,12 @@ required=(
     'modprobe ublk_drv',
     'I_ACCEPT_GPU_SWAP_REBOOT',
     'zram_untouched=YES',
+    'V070_START_BLOCKED',
+    'systemd-run --system',
+    '--property=OOMScoreAdjust=-950',
+    '--setenv="NOPEN_UBLK_SHADOW_FILE=$shadowfile"',
+    'swapoff "$dev"',
+    'shadowdir="/var/lib/nopen-v070"',
 )
 for phrase in required:
     if phrase not in data: raise AssertionError(f"required guard absent: {phrase}")
@@ -28,4 +34,4 @@ test=subprocess.run(["bash",str(path),"start","3"],text=True,capture_output=True
 if test.returncode==0:
     raise AssertionError("invalid pool incorrectly accepted")
 print("V070_GATE_PASS command_syntax=YES consent_required=YES "
-      "zram_preserved=YES invalid_capacity_rejected=YES no_auto_swap=YES")
+      "zram_preserved=YES invalid_capacity_rejected=YES no_auto_swap=YES failing_physical_swap_blocked=YES independent_systemd_unit=YES durable_shadow_required=YES")
