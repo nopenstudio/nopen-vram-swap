@@ -4,6 +4,7 @@
 #include "isolated_protocol.h"
 #include <errno.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -90,6 +91,17 @@ int main(int argc,char **argv) {
             if(!status)status=nopen_blk_write(b,msg.offset,buffer,msg.bytes);
         } else if(!status) {
             status=nopen_blk_read(b,msg.offset,buffer,msg.bytes);
+        }
+        if(status<0) {
+            fprintf(stderr,
+              "NOPEN_WORKER_IO_FATAL backend=%s op=%s"
+              " offset=%" PRIu64 " bytes=%u errno=%d"
+              " backend_error=%s failed_page_recovery=NO\\n",
+              backend==NOPEN_STORE_OPENCL?"opencl":"mock",
+              msg.op==NOPEN_IPC_READ?"READ":"WRITE",
+              msg.offset,msg.bytes,-status,
+              nopen_blk_last_error(b));
+            fflush(stderr);
         }
         msg.status=status;
         msg.checksum=(status==0 && msg.op==NOPEN_IPC_READ)
