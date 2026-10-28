@@ -83,6 +83,7 @@ jobs:
             -Iv060/include -Iv050/include -Iv012/include -I/tmp/ublksrv \
             /tmp/ublksrv/targets/ublksrv_tgt.cpp \
             v060/experimental/ublk/nopen_ublk_recovery_target.cpp \
+            build-v060-ublk/libnopen_isolated_io.a \
             build-v060-ublk/libnopen_recovery.a \
             build-v060-ublk/v050/libnopen_blk_backend.a \
             build-v060-ublk/v050/v040/v030/v012/libnopen_vram_store.a \
@@ -135,6 +136,7 @@ jobs:
             -Iv060/include -Iv050/include -Iv012/include -I/tmp/ublksrv \
             /tmp/ublksrv/targets/ublksrv_tgt.cpp \
             v060/experimental/ublk/nopen_ublk_recovery_target.cpp \
+            build-v060-kernel/libnopen_isolated_io.a \
             build-v060-kernel/libnopen_recovery.a \
             build-v060-kernel/v050/libnopen_blk_backend.a \
             build-v060-kernel/v050/v040/v030/v012/libnopen_vram_store.a \
