@@ -22,6 +22,7 @@ jobs:
           bash -n v070/tools/test_shadow_vm.sh
           bash -n v070/tools/test_shadow_swap_vm.sh
           bash -n v070/tools/pilot_pressure.sh
+          bash -n v070/tools/test_btrfs_vm.sh
       - name: Confirm no unconsented swap or zram modification
         run: |
           python3 v070/tests/test_swap_policy.py v070/tools/vram_swap_lab.sh
@@ -61,8 +62,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y autoconf automake libtool pkg-config g++ cmake \
-            liburing-dev ocl-icd-opencl-dev opencl-headers util-linux
+            liburing-dev ocl-icd-opencl-dev opencl-headers util-linux btrfs-progs
           bash v070/tools/build_ublk.sh
+      - name: Verify isolated Btrfs NOCOW SSD backup and worker recovery
+        if: steps.ublk.outputs.available == 'true'
+        timeout-minutes: 4
+        run: |
+          bash -n v070/tools/test_btrfs_vm.sh
+          sudo env GITHUB_ACTIONS=true NOPEN_ISOLATED_VM_TEST=I_ACKNOWLEDGE_DISPOSABLE_VM \
+            bash v070/tools/test_btrfs_vm.sh \
+              "$GITHUB_WORKSPACE/build-v070/nopen-test-shadow" \
+              "$GITHUB_WORKSPACE/build-v070/v060/nopen-isolated-worker"
       - name: Root systemd service cgroup outlives user login lifecycle
         if: steps.ublk.outputs.available == 'true'
         timeout-minutes: 3
