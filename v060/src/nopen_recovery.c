@@ -24,6 +24,7 @@ struct nopen_recovery {
     nopen_recovery_mode mode;
     nopen_recovery_stats stats;
     pthread_mutex_t mutex;
+    size_t injected_rebuild_failure_after_pages; /* MOCK-only; zero disables */
 };
 
 static int bounds(const nopen_recovery *r,uint64_t off,size_t bytes) {
@@ -212,6 +213,84 @@ int nopen_recovery_write(nopen_recovery *r,uint64_t off,const void *src,size_t l
                     (const unsigned char *)src+i*PAGE,PAGE);
         }
         r->stats.writes++;
+    }
+    pthread_mutex_unlock(&r->mutex);
+    return rc;
+}
+
+/* Two-phase fail-closed repair. The CPU mirror is authoritative, and a brand
+ * new device backend becomes active only after ALL pages have been written,
+ * read back and checksum compared against the mirror. The old backend remains
+ * untouched until the rebuilt one has passed verification. Holding the mutex
+ * serializes application I/O; kernel/driver calls can still block forever if
+ * the device is broken, so this requires out-of-process supervision. */
+int nopen_recovery_inject_rebuild_failure(nopen_recovery *r,size_t pages) {
+    if(!r)return -EINVAL;
+    pthread_mutex_lock(&r->mutex);
+    if(r->backend!=NOPEN_STORE_MOCK) {
+        pthread_mutex_unlock(&r->mutex);
+        return -EPERM;
+    }
+    r->injected_rebuild_failure_after_pages=pages;
+    pthread_mutex_unlock(&r->mutex);
+    return 0;
+}
+int nopen_recovery_rebuild_gpu(nopen_recovery *r) {
+    if(!r)return -EINVAL;
+    pthread_mutex_lock(&r->mutex);
+    if(!r->mirror || r->stats.state!=NOPEN_RECOVERY_CPU_FALLBACK) {
+        pthread_mutex_unlock(&r->mutex);
+        return -EPERM;
+    }
+    r->stats.rebuild_attempts++;
+    /* Read and verify ALL authoritative pages before trying GPU allocation.
+     * This is costly, deliberate, and avoids claiming recovery of bad data. */
+    if(check_mirror(r,0,r->pages)!=0) {
+        r->stats.rebuild_failures++;
+        pthread_mutex_unlock(&r->mutex);
+        return -EIO;
+    }
+    nopen_blk_backend *fresh=NULL;
+    const size_t capacity_mib=r->pages/(MIB/PAGE);
+    if(nopen_blk_open(&fresh,r->backend,capacity_mib)!=0) {
+        r->stats.rebuild_failures++;
+        pthread_mutex_unlock(&r->mutex);
+        return -EIO;
+    }
+    size_t verified=0;
+    int rc=0;
+    while(verified<r->pages) {
+        const size_t pages=(r->pages-verified)>16u?16u:r->pages-verified;
+        const uint64_t off=(uint64_t)verified*PAGE;
+        const size_t bytes=pages*PAGE;
+        if(nopen_blk_write(fresh,off,r->mirror+verified*PAGE,bytes)!=0 ||
+           nopen_blk_read(fresh,off,r->scratch,bytes)!=0 ||
+           memcmp(r->scratch,r->mirror+verified*PAGE,bytes)!=0) {
+            rc=-EIO;
+            break;
+        }
+        verified+=pages;
+        r->stats.rebuild_verified_pages+=pages;
+        if(r->backend==NOPEN_STORE_MOCK &&
+           r->injected_rebuild_failure_after_pages &&
+           verified>=r->injected_rebuild_failure_after_pages) {
+            rc=-EIO;
+            break;
+        }
+    }
+    r->injected_rebuild_failure_after_pages=0;
+    if(rc==0) {
+        nopen_blk_backend *old=r->gpu;
+        r->gpu=fresh;
+        r->stats.state=NOPEN_RECOVERY_GPU_ACTIVE;
+        r->stats.rebuild_successes++;
+        /* Old backend cleanup may hang on real broken drivers. No guarantee of
+         * kernel-level deadline or reset completion is made here. */
+        nopen_blk_close(old);
+    } else {
+        r->stats.rebuild_failures++;
+        nopen_blk_close(fresh);
+        /* Stay in healthy CPU fallback after partial failed GPU repair. */
     }
     pthread_mutex_unlock(&r->mutex);
     return rc;
