@@ -58,6 +58,7 @@ timeout 10s dd if="$dev" of="$d/actual" bs=4096 count=8 iflag=direct status=none
 cmp "$d/expected" "$d/actual"
 timeout 15s "$ctl" del -n "$id"
 created=0
-systemctl stop "$unit"
+# libublksrv may exit and --collect unload the transient unit after del.
+systemctl stop "$unit" >/dev/null 2>&1 || true
 if systemctl is-active --quiet "$unit"; then exit 5; fi
 echo "SYSTEM_UNIT_VM_PASS cgroup_system_slice=YES user_session_independent=YES live_kernel_io=YES worker_mock=YES no_global_swap=YES"
