@@ -151,3 +151,39 @@ Bu testin sonucu gerçek Radeon I/O'nun ve güvenilir disk fallback'in birlikte 
 - Kanıt: https://github.com/nopenstudio/nopen-vram-swap/actions/runs/40751604294 — **38/38 CTest, 3/3 CI**.
 
 **Sınır:** Gerçek kernel SWAP ve reclaim yolu çalıştırıldı, ancak GPU backend **mock** idi. Gerçek RX 9060 XT'de 64MiB OpenCL + SSD shadow işçi kaybı testi daha önce başarılıydı (16.384/16.384 sayfa). Bu iki başarı birlikte fiziksel GPU destekli kernel SWAP'in düşük bellek baskısında kilitlenmeyeceğini veya oyun FPS'sini artıracağını henüz kanıtlamaz. Fiziksel `start` engeli şu anda yürürlüktedir.
+
+## RX 9060 XT için 64MiB fiziksel kernel-SWAP pilotu — yalnızca açık opt-in
+
+**Mühendislik durumu:** Önceki 256MiB fiziksel OpenCL kernel swap denemesi kilitlendi (Issue #7). Artık gerçek Linux kernel SWAP'e yazılan sayfalar, GitHub geçici VM'de **41.432 KiB swap kullanılırken GPU işçisi SIGKILL edildiğinde** SSD yedeğinden yeniden okunabildi; 24.576 uygulama sayfasının tamamı doğrulandı. Ayrıca RX 9060 XT gerçek OpenCL + 64MiB SSD kurtarma deneyinden başarı alındı; ancak iki testin birlikte **fiziksel GPU altında çekirdek reclaim** güvenliğini kanıtlamadığını unutmayın.
+
+**Bu nedenle genel `start` komutu HÂLÂ engelli.** Yalnızca 64MiB, ext4/xfs SSD yedeğiyle, iki aşamalı açık onay isteyen `start-pilot` geliştirildi. Pilot gerçek `swapon` yapar; ana bilgisayarı yine kilitleyebilir. 64MiB kapasite tek başına ölü kilidi önlemez.
+
+~~~bash
+cd ~/nopen-v070
+git pull --ff-only
+bash v070/tools/build_ublk.sh
+ctest --test-dir build-v070 --output-on-failure
+sudo env NOPEN_V070_PILOT_ACK=I_ACCEPT_64MIB_KERNEL_GPU_SWAP_RISK \
+  bash v070/tools/vram_swap_lab.sh start-pilot 64
+bash v070/tools/vram_swap_lab.sh status
+~~~
+
+Başlatırken ekranda görünen risk uyarısına `EVET` yazmak gerekir. Sunucu KDE kullanıcı oturumundan bağımsız root `system.slice` servisinde çalışır; 64MiB GPU aygıtı + fiziksel SSD üzerinde baştan oluşturulmuş `O_DIRECT | O_DSYNC` shadow dosyası zorunludur. ZRAM devre dışı bırakılmaz. SSD shadow her yazıda çalıştığından bu saf VRAM SWAP'in performans testi değildir.
+
+**Yalnızca pilotu başlatabildiyseniz**, gerçek SWAP sayfalarını harekete geçirmek için 96MiB cgroup RAM limiti altında 112MiB örüntülü bellek sınaması:
+
+~~~bash
+sudo env NOPEN_V070_PILOT_ACK=I_ACCEPT_64MIB_KERNEL_GPU_SWAP_RISK \
+  bash v070/tools/pilot_pressure.sh \
+  | tee "$HOME/nopen-v070-physical-pilot.log"
+~~~
+
+Beklenen kayıtlar: `V070_PILOT_PRESSURE_SNAPSHOT device_swap_used_kib=...` (pozitif) ve `V070_PILOT_PRESSURE_PASS_AFTER_READ verified_memory_pages=28672`. Bu 28.672 sayfanın hepsinin swap'e taşındığı anlamına gelmez. Kontrollü cgroup testi de GPU sürücüsünü veya kernel'i kilitleyebilir.
+
+Deneme bitince, önce SWAP'i geri kapatın:
+
+~~~bash
+sudo bash v070/tools/vram_swap_lab.sh stop
+~~~
+
+`swapoff` başarısız olursa Nopen aygıtını silmeyin ve sunucuyu öldürmeyin; komut aygıtı kasıtlı olarak etkin tutar. Hata durumunda `/var/log/nopen-v070` günlükleri ve `journalctl -k` önce incelenmelidir. Bu pilotu geçen RX 9060 XT, yalnızca bir sonraki Bannerlord karşılaştırma adayımız olur; oyun FPS artışı, net RAM tasarrufu veya tam kernel kararlılığı otomatik olarak kanıtlanmış sayılmaz.
