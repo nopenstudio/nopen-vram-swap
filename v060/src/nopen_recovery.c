@@ -131,6 +131,18 @@ int nopen_recovery_inject_io_failure(nopen_recovery *r,size_t operation) {
     pthread_mutex_unlock(&r->mutex);
     return 0;
 }
+/* Mock-only corrupt a full-mirror byte without updating its checksum. The
+ * next fallback/read MUST fail closed rather than expose corrupted bytes. */
+int nopen_recovery_inject_mirror_corruption(nopen_recovery *r,size_t page) {
+    if(!r)return -EINVAL;
+    pthread_mutex_lock(&r->mutex);
+    int rc=0;
+    if(r->backend!=NOPEN_STORE_MOCK || !r->mirror || page>=r->pages)
+        rc=-EPERM;
+    else r->mirror[page*PAGE]^=0x5Au;
+    pthread_mutex_unlock(&r->mutex);
+    return rc;
+}
 int nopen_recovery_read(nopen_recovery *r,uint64_t off,void *out,size_t len) {
     if(!out || bounds(r,off,len)!=0)return -EINVAL;
     pthread_mutex_lock(&r->mutex);
