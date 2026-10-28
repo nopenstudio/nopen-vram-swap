@@ -35,4 +35,42 @@ with TemporaryDirectory() as td:
         assert "no real Bannerlord" in str(exc)
     else:
         raise AssertionError("accepted launcher process as active game")
-print("BANNERLORD_PID_TEST_PASS real_proton_game_selected=YES truncated_comm_supported=YES launcher_excluded=YES zombie_excluded=YES")
+
+# User's actual Proton setup reports Starter, with TaleWorlds launcher argv and
+# ~2.5GiB RSS. Do not confuse the small, separate TaleWorlds launcher with it.
+with TemporaryDirectory() as td:
+    root=Path(td)
+    launcher=r"S:\steamapps\common\Mount & Blade II Bannerlord\bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.Launcher.exe"
+    fake(root,21347,"Starter",launcher,2625492)
+    fake(root,21348,"Starter",launcher,43000)
+    fake(root,19641,"TaleWorlds.Mount",launcher,105000)
+    fake(root,21612,"Coop.CrashRepor",
+         r"S:\steamapps\workshop\content\261550\3770450698\Coop.CrashReporter.exe",
+         65000)
+    assert find_game_pid(root)==21347
+    assert len(entries(root))==1
+    # A launcher with the same argv but 100MiB RSS is not proof of game.
+    (root/"21347"/"status").write_text(
+        "State:\tS (sleeping)\nVmRSS:\t110000 kB\n")
+    try:
+        find_game_pid(root)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("classified low-RSS launcher as game")
+    # High-RSS generic Starter unrelated to the game should be ignored.
+    (root/"21347"/"status").write_text(
+        "State:\tS (sleeping)\nVmRSS:\t2625492 kB\n")
+    (root/"21347"/"cmdline").write_bytes(
+        b"Z:\\OtherGame\\Starter.exe\0")
+    try:
+        find_game_pid(root)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("classified unrelated Starter as Bannerlord")
+
+print("BANNERLORD_PID_TEST_PASS real_proton_game_selected=YES "
+      "truncated_comm_supported=YES starter_host_supported=YES "
+      "low_rss_launcher_excluded=YES zombie_excluded=YES")
+
