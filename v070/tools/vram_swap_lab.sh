@@ -7,6 +7,7 @@ action="${1:-status}"
 capacity="${2:-}"
 build="$repo/build-v070"
 state="/run/nopen-v070"
+logdir="/var/log/nopen-v070"
 dev="/dev/ublkb23"
 id=23
 priority=200
@@ -86,16 +87,20 @@ if [[ "$(printenv NOPEN_V070_ACCEPT_RISK || :)" != "I_ACCEPT_GPU_SWAP_REBOOT" ]]
   [[ "$approval" == EVET ]] || { echo "V070_REFUSED consent not received"; exit 2; }
 fi
 install -d -m 0700 "$state"
+install -d -m 0700 "$logdir"
+logfile="$logdir/server-$(date +%Y%m%d-%H%M%S).log"
+ln -sfn "$logfile" "$state/log"
 printf '%s\n' "$dev" > "$state/device"
 printf '%s\n' "$capacity" > "$state/capacity"
 swapon --show > "$state/swapon-before.txt"
 echo "V070_START pool_mib=$capacity device=$dev priority=$priority zram_preserved=YES" | tee "$state/start.log"
+echo "V070_PERSISTENT_LOG file=$logfile realtime_log=YES"
 NOPEN_V070_KERNEL_SWAP_TEST=EXPERIMENTAL_GPU_SWAP_CAN_HANG \
 NOPEN_UBLK_BACKEND=opencl \
 NOPEN_V070_CAPACITY_MIB="$capacity" \
 NOPEN_UBLK_WORKER_BIN="$worker" \
 "$target" add -t nopen-vram-swap-lab -n "$id" -q 1 -d 16 \
-  --max_io_buf_bytes 65536 > "$state/log" 2>&1 &
+  --max_io_buf_bytes 65536 > "$logfile" 2>&1 &
 server_pid=$!
 echo "$server_pid" > "$state/pid"
 ready=0
