@@ -47,11 +47,11 @@ ctest --test-dir build-v060 --output-on-failure
 
 `RECOVERY_LAB_PASS` yalnızca kontrollü veri doğruluğu testidir. GPU reseti, kernel aygıtı ve global SWAP deneyinden tamamen farklıdır.
 
-## v0.6 kabul kapıları (henüz tamamlanmadı)
+## v1.0 için açık kalan donanım / sistem SWAP güvenlik kapıları
 
 1. Mock hata / device-lost / mirror corruption ve host-budget OOM testlerinin tümünün geçmesi.
 2. RX 9060 XT gerçek OpenCL üzerinde iki kontrollü kayıp-bildirimi laboratuvarı.
-3. Gerçek Linux ublk aygıtı için **ayrı test sistemi veya kurtarma planı olan yalıtılmış kurulum**: oluşturma, 4 KiB I/O, daemon ölümü, bloke I/O ve temiz silme.
+3. Gerçek Linux ublk aygıtı oluşturma, 4 KiB direct I/O, birebir doğrulama ve silme **geçici GitHub VM üzerinde iki mock backend modunda GEÇTİ**. RX 9060 XT gerçek GPU ile kernel-aygıtı testi, daemon ölümü ve bloke I/O başarısızlık senaryoları hâlâ bekliyor.
 4. AMDGPU reseti (gerçek reset, firmware timeout, GPU context kaybı) ve sürücü kaynaklı I/O askıda kalmasının p99/max/timeout testi.
 5. İleri ilerleme ve deadlock incelemesi, dayanıklı veri yedeği, host mirror olmayan çözümde veri kaybına yönelik açık fail-close sözleşmesi.
 6. NopenOS hedefindeki GNU'suz saf bellek politikası ayrı tutulur.
