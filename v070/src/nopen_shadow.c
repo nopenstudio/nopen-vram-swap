@@ -89,10 +89,21 @@ int nopen_shadow_open(nopen_shadow **out,nopen_backend backend,
     s->fd=open(path,O_CREAT|O_EXCL|O_RDWR|O_DIRECT|O_DSYNC|O_CLOEXEC,0600);
     if(s->fd<0)goto open_error;
     struct statfs fs;
-    if(fstatfs(s->fd,&fs)!=0 || fs.f_type==TMPFS_SUPER_MAGIC)
+    if(fstatfs(s->fd,&fs)!=0)goto open_error;
+    if(fs.f_type==TMPFS_SUPER_MAGIC) {
+        /* A RAM-backed shadow is not an independent recovery authority.
+         * Never silently downgrade to tmpfs, even for mock tests. */
+        fprintf(stderr,"NOPEN_SHADOW_REFUSED reason=tmpfs"
+                       " independent_storage_required=YES path=%s\n",path);
+        errno=EOPNOTSUPP;
         goto open_error;
-    if(posix_fallocate(s->fd,0,(off_t)(mib*MIB))!=0)
+    }
+    const int allocation_rc=posix_fallocate(s->fd,0,(off_t)(mib*MIB));
+    if(allocation_rc!=0) {
+        /* posix_fallocate returns the error code; it needn't set errno. */
+        errno=allocation_rc;
         goto open_error;
+    }
     memset(s->aligned,0,BLOCK);
     const uint64_t zero_checksum=nopen_page_checksum(s->aligned,PAGE);
     /* Convert all preallocated, unwritten extents to initialized extents
@@ -106,8 +117,11 @@ int nopen_shadow_open(nopen_shadow **out,nopen_backend backend,
     }
     if(fdatasync(s->fd)!=0)goto open_error;
     for(size_t i=0;i<s->pages;i++)s->checksums[i]=zero_checksum;
-    if(nopen_isolated_open(&s->gpu,backend,mib,timeout_ms,worker)!=0)
+    const int worker_rc=nopen_isolated_open(&s->gpu,backend,mib,timeout_ms,worker);
+    if(worker_rc!=0) {
+        errno=-worker_rc;
         goto open_error;
+    }
     s->gpu_active=1;s->stats.gpu_active=1;
     s->stats.backed_bytes=(uint64_t)mib*MIB;
     *out=s;
