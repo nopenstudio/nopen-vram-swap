@@ -85,3 +85,34 @@ python3 v060/tools/game_baseline.py --pid GAME_PID \
 ~~~
 
 **GAME_PID gerçek oyun proses PID'sidir;** bu sadece çalışmakta olan oyunu okur, başlatmaz veya yönetmez. Çıktı dosyası varsa üzerine yazmaz.
+
+## v0.6 son geliştirme paketi — geri yükleme ve çekirdek I/O doğrulaması
+
+**İlk sürüm iskeletine eklenen gerçek uygulama:**
+
+- `nopen_recovery_rebuild_gpu()` artık full CPU-mirror modunda GPU kaybından sonra yeni `nopen_blk_backend` ayırır, bütün sayfaları toplu yazıp tekrar okur ve karşılaştırır. Yeniden yüklenen 4KiB sayfaların tamamı doğru olmadan `GPU_ACTIVE` durumuna geçmez. Kısmi yeniden yükleme hatasında eski CPU kopyası korunur, GPU verisi güvenilmez olarak kullanılmaz. Sıralama mutex ile korunur. `NO_MIRROR` için geri yükleme reddedilir.
+- `nopen-isolated-worker` bağımsız bir süreçtir; GPU context o süreçte açılır. `nopen_isolated_io` üst işlemi onu `posix_spawn()` ile başlatır. UNIX soketinden 4–64KiB blok istekleri ve karşılıklı checksum gönderilir. Bir I/O isteğinin tamamlama yanıtı 50–5000ms içinde gelmezse üst süreç `-ETIMEDOUT` döndürür, GPU işçisini sonlandırmayı dener ve sonraki bütün istekleri `-EIO` ile durdurur. Bu, gerçek AMDGPU sürücüsünün kernel D-state takılmasını düzelttiğinin garantisi değildir.
+- `v060/experimental/ublk/nopen_ublk_recovery_target.cpp` varsayılan `NO_MIRROR` blok I/O yolunda artık bu bağımsız worker sürecini kullanır. `NOPEN_UBLK_WORKER_BIN` ile worker yolu açıkça belirtilir; OpenCL yoksa mock'a sessiz düşüş yoktur. İsteğe bağlı `NOPEN_UBLK_RECOVERY_MODE=full-cpu-mirror` test modunda tam CPU kopyası, mevcut in-process recovery motoru tarafından kullanılır; RAM kazanımı iddia edilmez.
+- `nopen-test-rebuild` 1024 sayfanın yeniden oluşturulması, kısmi hata, CPU fallback, 4 eşzamanlı istemci ve bozuk mirror nedeniyle fail-closed davranışını denetler.
+- `nopen-test-isolated-io` 300 x 16KiB yazma/okuma turu, checksum doğrulaması, aralık sınırları ve 100ms kontrollü işçi askısı altında timeout davranışını denetler.
+- `nopen-isolated-smoke` gerçek AMD OpenCL veya açık mock backend için 4MiB/1024 sayfalık rastgele 4KiB okuma-yazma ve tam geri okuma laboratuvarıdır.
+
+**Çalıştırılmış gerçek kernel testi (GitHub ephemeral VM, mock veri backend'i):** `ublk` aygıtı oluşturulup 4KiB direct I/O yapıldı, veri byte-by-byte doğrulandı, aygıt kaldırıldı. Aynı işlem hem tam CPU mirror hem exec-isolated worker modunda geçmiştir. CI çıktısında `UBLK_LIFECYCLE_PASS ... mirror_and_isolated_worker=YES ...` kaydı vardır. Linux kernel ublk sürücüsü gerçekten çalıştırıldı; GPU ise gerçek değil mock olarak seçildi. Bu nedenle fiziksel RX 9060 XT resetini, SWAP sırasındaki reclaim ilerlemesini veya varsayılan oyun belleği entegrasyonunu kanıtlamaz.
+
+### Donanım için hazır olan iki gerçek OpenCL kabul deneyi
+
+~~~bash
+cd ~/nopen-v060
+git pull --ff-only
+cmake -S v060 -B build-v060 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+cmake --build build-v060 --parallel
+ctest --test-dir build-v060 --output-on-failure
+./build-v060/nopen-recovery-lab --backend opencl --mode mirror --operations 1000 --inject-loss-after 500 --rebuild-after-loss
+./build-v060/nopen-isolated-smoke --worker "$PWD/build-v060/nopen-isolated-worker" --backend opencl --operations 1000 --timeout-ms 2000
+~~~
+
+Bu iki test sudo gerektirmez, GPU'yu **gerçekte resetlemez**, kernel SWAP veya `ublk` aygıtı oluşturmaz. Kullanıcının RX 9060 XT üzerinde çalıştırılıp kabul edilmesi ayrıdır.
+
+### v0.6 mühendislik çıkış kararı
+
+v0.6'nin amaçladığı hata durum makinesi, GPU veri kaybı bildirimi, CPU yedekten GPU'yu yeniden oluşturma, fail-closed, kontrollü OOM tahsis reddi, kullanıcı alanı I/O timeout'u ve ublk çekirdek I/O bağlantısının **prototip kodu tamamlandı**. Gerçek AMDGPU firmware/kernel reseti, tam sistem SWAP reclaim kilitlenmesizliği ve daemon yeniden başlatma sonrası dayanıklı veri yedeği henüz doğrulanmadı. Bu iddialar ürün v1.0 kabulünde zorunlu olacak; v0.6 kod kilometre taşıyla karıştırılmamalı.
