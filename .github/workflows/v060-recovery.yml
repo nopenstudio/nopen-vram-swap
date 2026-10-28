@@ -1,0 +1,60 @@
+name: v0.6 GPU loss fail-closed recovery (no global swap)
+on:
+  push:
+    branches: ["develop/v0.6.0"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mock-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile v0.6 and all inherited tests
+        run: |
+          cmake -S v060 -B build-v060-mock -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-v060-mock --parallel
+          ctest --test-dir build-v060-mock --output-on-failure
+      - name: Stress fail-closed recovery and retained Linux VM policy
+        run: |
+          ./build-v060-mock/nopen-test-recovery
+          ./build-v060-mock/v050/nopen-vm-test-policy
+      - name: Guard against accidental swap activation or kernel tuning
+        run: |
+          ! grep -En 'swapon\(|swapoff\(|NBD_DO_IT|/proc/sys/vm/|systemctl ' \
+             v060/src/nopen_recovery.c v060/include/nopen_recovery.h
+  opencl-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build prerequisites (no actual AMD GPU in CI)
+        run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev opencl-headers
+      - name: Compile OpenCL backend and execute mock fallback checks
+        run: |
+          cmake -S v060 -B build-v060-opencl -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+          cmake --build build-v060-opencl --parallel
+          ctest --test-dir build-v060-opencl --output-on-failure
+  asan-ubsan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: AddressSanitizer + UndefinedBehaviorSanitizer
+        run: |
+          cmake -S v060 -B build-v060-san -DCMAKE_BUILD_TYPE=Debug -DNOPEN_OPENCL=OFF \
+            -DCMAKE_C_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' \
+            -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+          cmake --build build-v060-san --parallel
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 \
+            ctest --test-dir build-v060-san --output-on-failure
+  freestanding-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: VM and pager policies build without GNU/Linux runtime
+        run: |
+          gcc -std=c11 -ffreestanding -fno-builtin -Wall -Wextra -Werror \
+            -Iv050/include -c v050/src/nopen_vm_policy.c -o /tmp/nopen-vm-policy.o
+          gcc -std=c11 -ffreestanding -fno-builtin -Wall -Wextra -Werror \
+            -Iv012/include -c v012/src/nopen_page_core.c -o /tmp/nopen-page-core.o
+          test -z "$(nm -u /tmp/nopen-vm-policy.o)"
+          test -z "$(nm -u /tmp/nopen-page-core.o)"
