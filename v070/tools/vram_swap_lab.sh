@@ -8,6 +8,7 @@ capacity="${2:-}"
 build="$repo/build-v070"
 state="/run/nopen-v070"
 logdir="/var/log/nopen-v070"
+shadowdir="/var/lib/nopen-v070"
 dev="/dev/ublkb23"
 id=23
 priority=200
@@ -58,7 +59,15 @@ if [[ "$action" == stop ]]; then
     exit 7
   fi
   echo "V070_STOP_PASS device_removed=YES zram_untouched=YES"
-  rm -f "$state/pid" "$state/device" "$state/capacity"
+  if [[ -r "$state/shadow-file" ]]; then
+    shadowfile="$(cat "$state/shadow-file")"
+    # Delete only the exact dedicated persistent shadow AFTER successful
+    # swapoff and kernel device teardown. Never delete active swap backing.
+    if [[ "$shadowfile" == "$shadowdir/"* && -f "$shadowfile" ]]; then
+      rm -- "$shadowfile"
+    fi
+  fi
+  rm -f "$state/pid" "$state/device" "$state/capacity" "$state/shadow-file"
   exit 0
 fi
 # Known blocking defect: actual RX 9060 XT live kernel swap-in failed with
@@ -98,6 +107,16 @@ if [[ "$(printenv NOPEN_V070_ACCEPT_RISK || :)" != "I_ACCEPT_GPU_SWAP_REBOOT" ]]
   [[ "$approval" == EVET ]] || { echo "V070_REFUSED consent not received"; exit 2; }
 fi
 install -d -m 0700 "$state"
+install -d -m 0700 "$shadowdir"
+shadowtype="$(stat -f -c '%T' "$shadowdir")"
+case "$shadowtype" in
+  ext2/ext3|xfs) ;;
+  *) echo "V070_REFUSED SSD shadow filesystem $shadowtype not approved (requires ext4/xfs O_DIRECT preallocation)" >&2
+     exit 2 ;;
+esac
+shadowfile="$shadowdir/shadow-$(date +%Y%m%d-%H%M%S)-$.bin"
+[[ ! -e "$shadowfile" ]] || { echo "V070_REFUSED shadow file exists" >&2; exit 2; }
+printf '%s\n' "$shadowfile" > "$state/shadow-file"
 install -d -m 0750 -g "$(id -gn "${SUDO_USER:-root}")" "$logdir"
 logfile="$logdir/server-$(date +%Y%m%d-%H%M%S).log"
 install -m 0640 -g "$(id -gn "${SUDO_USER:-root}")" /dev/null "$logfile"
@@ -107,6 +126,7 @@ printf '%s\n' "$capacity" > "$state/capacity"
 swapon --show > "$state/swapon-before.txt"
 echo "V070_START pool_mib=$capacity device=$dev priority=$priority zram_preserved=YES" | tee "$state/start.log"
 echo "V070_PERSISTENT_LOG file=$logfile realtime_log=YES"
+echo "V070_SHADOW_PREPARE path=$shadowfile durability=O_DIRECT_O_DSYNC"
 # The ublk target runs in the foreground as a SYSTEM service; the service is
 # independent of user@1000.service/KDE. This corrects the observed session
 # teardown problem, but does not fix the earlier kernel WRITE timeout.
@@ -123,6 +143,7 @@ if ! systemd-run --system --quiet --unit=nopen-v070-ublk \
     --setenv=NOPEN_UBLK_BACKEND=opencl \
     --setenv="NOPEN_V070_CAPACITY_MIB=$capacity" \
     --setenv="NOPEN_UBLK_WORKER_BIN=$worker" \
+    --setenv="NOPEN_UBLK_SHADOW_FILE=$shadowfile" \
     "$target" add -t nopen-vram-swap-lab -n "$id" -q 1 -d 16 \
       --max_io_buf_bytes 65536; then
   echo "V070_START_FAILED could not launch independent root system service" >&2
