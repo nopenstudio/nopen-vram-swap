@@ -57,3 +57,31 @@ ctest --test-dir build-v060 --output-on-failure
 6. NopenOS hedefindeki GNU'suz saf bellek politikası ayrı tutulur.
 
 Bu şartlar sağlanmadan v0.6'yı kararlı gerçek SWAP sürümü, Bannerlord otomatik RAM uzantısı veya v1.0 diye duyuramayız.
+
+## v0.6 ilerleme 2 — gerçek I/O zaman aşımı izleme ve Bannerlord ölçüm hazırlığı
+
+`v060/tools/watchdog.py` Linux kullanıcı alanındaki GPU deneylerini **ayrı bir process group** içinde çalıştırıp 1–60 sn sınır uygular. Süre aşılırsa önce SIGTERM, ardından en fazla 2 sn grace sonrası SIGKILL yollar; sürecin gerçekten sona erdiğini doğrulamadan başarı sonucu üretmez. `RECOVERY_LAB_PASS` veya `STRESS_PASS` gibi doğru çocuk doğrulamasını ve `no_global_swap=YES` alanını görmeden `WATCHDOG_PASS` yazmaz. Yazılan log 1MiB ile sınırlandırılmıştır; büyük çıktı deadlock yaratmasın diye tempfile kullanılır. Testte gerçek bellek baskısı, GPU reseti veya kernel swap açılmaz.
+
+**Sınır:** GPU sürücüsü çekirdekte kesilemez D durumunda bekliyorsa SIGKILL işlemi sonlandırmaya yetmeyebilir. Böyle durumda `WATCHDOG_UNREAPED` bildirimi verir ve güvende olduğunu iddia etmez. Watchdog gerçek kernel deadlock'unu çözdüğünün kanıtı değildir.
+
+~~~bash
+cd ~/nopen-v060
+git pull --ff-only
+cmake -S v060 -B build-v060 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+cmake --build build-v060 --parallel
+ctest --test-dir build-v060 --output-on-failure
+python3 v060/tools/watchdog.py --timeout-seconds 10 --grace-seconds 0.5 \
+  --binary "$PWD/build-v060/nopen-recovery-lab" -- \
+  --backend opencl --mode failclosed --operations 1000 --inject-loss-after 500
+~~~
+
+Bu komut tüm sistem SWAP'ine dokunmaz; yalnızca ayrı GPU laboratuvar alt işlemini denetler. CTest, başarılı sonlandırma, sahte başarı reddi ve takılmış test prosesinin zaman aşımıyla kapatılmasını sınar.
+
+Bannerlord için de **oyunun Nopen kapalıyken süreç ağacı baz çizgisi** hazırladık: `v060/tools/game_baseline.py`. Kullanıcı oyunu kendisi açtıktan sonra PID verir; araç hiçbir oyuna kod enjekte etmez, `MemAvailable`, VmRSS/VmSwap, GPU genelindeki VRAM/GTT sayaçları ve alt süreç sayısını CSV'ye kaydeder. İstenirse 1–1800 sn ve 250–5000ms örnekleme. Bu toplam RSS paylaşılan sayfaları çift sayabilir ve fps/frametime ölçmez. FPS ve %1 low için ayrı bir frametime kaydı gerekecek. Gelecekte v0.7'de aynı sahnelerde Nopen etkin/kapalı karşılaştırmasına başlanacak.
+
+~~~bash
+python3 v060/tools/game_baseline.py --pid GAME_PID \
+  --duration-seconds 60 --interval-ms 1000 --csv "$HOME/bannerlord-baseline.csv"
+~~~
+
+**GAME_PID gerçek oyun proses PID'sidir;** bu sadece çalışmakta olan oyunu okur, başlatmaz veya yönetmez. Çıktı dosyası varsa üzerine yazmaz.
