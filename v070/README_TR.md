@@ -98,3 +98,20 @@ Bu işlem yalnızca `/dev/ublkb23` üzerinde `swapoff` yapıp başarılı oldukt
 5. Net sistem RAM ekonomisi ve FPS performansı ölçülmeden %200–300 hızlandırma iddia edilmez.
 
 Kernel ublk belgeleri: https://docs.kernel.org/block/ublk.html
+
+## 28 Ekim 2026 — v0.7 çöküş sonrası mimari onarım (geliştirildi)
+
+**Kök kanıt:** RX 9060 XT'de ilk `ublkb23` hatası saat 21:25:14'te bir **WRITE timeout** idi; onu yüzlerce/binlerce swap READ/WRITE error izledi. 21:25:19'da KDE kullanıcı oturumu sonlandırılırken `nopen-v070-ublk` sunucusu da öldürüldü; bu ikinci hata zincirini ağırlaştırdı ama ilk yazma zaman aşımının nedeni değildir.
+
+### Kodlanan iki düzeltme
+
+1. **Oturumdan bağımsız blok sunucusu:** Fiziksel test yönetimi artık `systemd-run --system` ile `nopen-v070-ublk.service` oluşturur. Bu servis `system.slice` altında çalışır, KDE `user@1000.service` yaşam döngüsüne bağımlı değildir. `stop` işlemi önce swapoff, sonra ublk del ve son olarak sistem servisini sonlandırır. GitHub geçici Linux VM'inde gerçek ublk I/O ve sistem cgroup testi eklendi.
+2. **GPU kaybında okunabilir sayfa garantisi için disk shadow:** `nopen_shadow` her başarılı sayfa yazmasından önce aynı içeriği bağımsız SSD/NVMe üzerindeki `O_DIRECT | O_DSYNC` dosyasına yazar. Dosya `O_EXCL` ile yepyeni oluşturulur, bütün sayfaları swap etkinleşmeden önce sıfır yazılarak fiziksel tahsis edilir. Ardından VRAM'e yazılır. GPU işçisi hata verir veya 2s timeout yaşarsa Nopen kalıcı disk yedeğine düşer, son doğrulanmış sayfaları buradan okur; devam eden yazmaları da yedeğe yapar. `CRC` hatası ya da backup diski hatasında `-EIO` döner. Fiziksel testte yedek dosyası zorunludur; yedeksiz `swapon` artık reddedilir.
+
+**Bedeli ve sınırlama:** Bu yöntem artık *saf VRAM SWAP değil*, NVMe yazma-through + VRAM okuma önbelleğidir. NVMe I/O gecikmesi, ek disk alanı ve dosya sistemi bağımlılığı vardır. Yedek disk OOM/reclaim'de kernel I/O için de kilitlenirse test hâlâ sistemi dondurabilir; reset, cgroup OOM ve daemon ölümünden sonraki kernel SWAP güvenliği **tam kanıtlanmadı**. 2–3x oyun hızlanması iddia edilmiyor.
+
+**Mock regresyon:** 500 ms GPU işçisi takılmasından sonra 1.024/1.024 sayfa backup üzerinden geri okundu ve yeni yazma/okumalar doğru devam etti. Gerçek `ublk` mock backend ile worker `SIGKILL` ve disk yedekli I/O testini CI'a ekledik. AMDGPU fiziksel reset testi hâlâ yapılmadı.
+
+### Fiziksel test kuralı
+
+`v070/tools/vram_swap_lab.sh start` komutu şu anda **BLOKE**. Önce CI'da canlı `ublk` worker-kill, sistem servisi ve kernel swap-off senaryoları başarıyla bitmeli; fiziksel Radeon altında SSD-shadow ve PSI baskı testleri ayrı kabul edilmeli. Blokajı kullanıcı test isteğine rağmen bilerek koruyoruz; aynı yedeksiz hata yolunu tekrar kullanmamak için. `status` ve `stop` korunmuştur. GitHub sorun kaydı: https://github.com/nopenstudio/nopen-vram-swap/issues/7
