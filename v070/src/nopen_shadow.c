@@ -160,17 +160,20 @@ int nopen_shadow_read(nopen_shadow *s,uint64_t off,void *dst,size_t len) {
     int gpu_ok=0;
     const size_t first=(size_t)(off/PAGE);
     if(s->gpu_active) {
-        if(nopen_isolated_read(s->gpu,off,s->aligned,len)==0 &&
-           check(s,s->aligned,first,len/PAGE)==0) {
+        const int gpu_rc=nopen_isolated_read(s->gpu,off,s->aligned,len);
+        const int mismatch=gpu_rc==0 &&
+                           check(s,s->aligned,first,len/PAGE)!=0;
+        if(gpu_rc==0 && !mismatch) {
             gpu_ok=1;
             s->stats.gpu_reads++;
         } else {
             s->gpu_active=0;s->stats.gpu_active=0;
             s->stats.gpu_failures++;
-            s->stats.integrity_mismatches++; /* may be timeout or corruption */
+            if(mismatch)s->stats.integrity_mismatches++;
             fprintf(stderr,"NOPEN_SHADOW_FAILOVER op=READ offset=%llu"
-                    " bytes=%zu durable_copy=YES\n",
-                    (unsigned long long)off,len);
+                    " bytes=%zu gpu_error=%d integrity_mismatch=%d"
+                    " durable_copy=YES\n",
+                    (unsigned long long)off,len,gpu_rc,mismatch);
         }
     }
     if(!gpu_ok) {
