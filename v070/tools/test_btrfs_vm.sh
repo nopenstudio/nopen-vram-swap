@@ -46,18 +46,22 @@ grep -q V070_SHADOW_TEST_PASS "$dir/test.log" || {
 }
 # Swap pages REALLY go through a Linux kernel block device while its
 # authoritative SSD shadow lives on Btrfs NOCOW, not ext4. GPU remains mock.
-NOPEN_V070_SHADOW_TEST_DIR="$mnt/outer/shadow-subvolume" \
-  bash "$swaptest" "$target" "$controller" "$worker" \
-  >"$dir/kernel.log" 2>&1 || {
-  cat "$dir/kernel.log" >&2
-  echo "V070_BTRFS_KERNEL_SWAP_FAILED real swap-in/out recovery failed" >&2
-  exit 7
-}
-grep -q V070_PAGING_FAILOVER_PASS_AFTER_READ "$dir/kernel.log" || {
-  cat "$dir/kernel.log" >&2
-  exit 7
-}
-echo "V070_BTRFS_KERNEL_SWAP_PASS swapped_pages_recovered=YES"
+for attempt in 1 2 3; do
+  NOPEN_V070_SHADOW_TEST_DIR="$mnt/outer/shadow-subvolume" \
+    bash "$swaptest" "$target" "$controller" "$worker" \
+    >"$dir/kernel-$attempt.log" 2>&1 || {
+    cat "$dir/kernel-$attempt.log" >&2
+    echo "V070_BTRFS_KERNEL_SWAP_FAILED attempt=$attempt real_swapin_recovery=NO" >&2
+    exit 7
+  }
+  grep -q V070_PAGING_FAILOVER_PASS_AFTER_READ "$dir/kernel-$attempt.log" || {
+    cat "$dir/kernel-$attempt.log" >&2
+    echo "V070_BTRFS_KERNEL_SWAP_FAILED attempt=$attempt missing_integrity_proof=YES" >&2
+    exit 7
+  }
+  echo "V070_BTRFS_KERNEL_SWAP_ITERATION_PASS attempt=$attempt swapin_verified=YES"
+done
+echo "V070_BTRFS_KERNEL_SWAP_PASS repeated=3 swapped_pages_recovered=YES"
 echo "V070_BTRFS_KERNEL_SWAP_NOTE disk_shadow_btrfs_nocow=YES gpu_backend=mock"
 # A parent's regular subvolume snapshot must NOT contain nested child's data.
 # This mitigates auto-snapshotting of the host root subvolume, not direct
