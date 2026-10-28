@@ -87,8 +87,9 @@ if [[ "$(printenv NOPEN_V070_ACCEPT_RISK || :)" != "I_ACCEPT_GPU_SWAP_REBOOT" ]]
   [[ "$approval" == EVET ]] || { echo "V070_REFUSED consent not received"; exit 2; }
 fi
 install -d -m 0700 "$state"
-install -d -m 0700 "$logdir"
+install -d -m 0750 -g "$(id -gn "${SUDO_USER:-root}")" "$logdir"
 logfile="$logdir/server-$(date +%Y%m%d-%H%M%S).log"
+install -m 0640 -g "$(id -gn "${SUDO_USER:-root}")" /dev/null "$logfile"
 ln -sfn "$logfile" "$state/log"
 printf '%s\n' "$dev" > "$state/device"
 printf '%s\n' "$capacity" > "$state/capacity"
