@@ -54,10 +54,26 @@ int main(int argc,char **argv) {
     ASSERT(nopen_shadow_get_stats(s,&stats)==0);
     ASSERT(stats.shadow_reads>=PAGECOUNT/16 && stats.gpu_failures==1);
     ASSERT(stats.backed_bytes==4u*1024u*1024u && !stats.poisoned);
+    /* Corrupt the independent SSD backup deliberately: checksum must reject
+     * bad bytes and leave caller's memory completely unchanged. */
+    int fd=open(path,O_RDWR);
+    ASSERT(fd>=0);
+    unsigned char b=0;
+    ASSERT(pread(fd,&b,1,0)==1);
+    b^=0xA5u;
+    ASSERT(pwrite(fd,&b,1,0)==1);
+    ASSERT(fsync(fd)==0);
+    close(fd);
+    memset(read_buf,0xDA,P);
+    ASSERT(nopen_shadow_read(s,0,read_buf,P)==-EIO);
+    for(size_t i=0;i<P;i++)ASSERT(read_buf[i]==0xDA);
+    ASSERT(nopen_shadow_get_stats(s,&stats)==0);
+    ASSERT(stats.poisoned && stats.disk_failures==1);
+    ASSERT(nopen_shadow_write(s,0,src,P)==-EIO);
     nopen_shadow_close(s);
     unlink(path);rmdir(directory);
     puts("V070_SHADOW_TEST_PASS gpu_timeout=YES persisted_pages=1024 "
-         "fallback_read=YES fallback_write=YES no_unreadable_acknowledged_pages=YES "
+         "fallback_read=YES fallback_write=YES backup_corruption_rejected=YES no_unreadable_acknowledged_pages=YES "
          "real_gpu_reset_tested=NO no_global_swap=YES");
     return 0;
 }
