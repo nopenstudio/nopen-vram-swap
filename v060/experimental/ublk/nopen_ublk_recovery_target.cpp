@@ -13,6 +13,7 @@
 #include "ublksrv_tgt.h"
 extern "C" {
 #include "nopen_recovery.h"
+#include "nopen_isolated_io.h"
 }
 #include <cerrno>
 #include <climits>
@@ -29,6 +30,7 @@ constexpr unsigned kCapacityMiB = 64u;
 constexpr unsigned kPageSize = 4096u;
 struct NopenTarget {
     nopen_recovery* backing=nullptr;
+    nopen_isolated_io* isolated=nullptr;
 };
 bool isolated_virtual_machine() {
     FILE* f=fopen("/sys/class/dmi/id/product_name","r");
@@ -92,8 +94,20 @@ int open_target(ublksrv_dev* dev,int,int,char**) {
         delete state;
         return -EINVAL;
     }
-    int rc=nopen_recovery_open_bounded(&state->backing,backend,
+    int rc=0;
+    if(mode==NOPEN_RECOVERY_HOST_MIRROR) {
+        // Explicitly expensive CPU fallback lab only: no RAM savings.
+        rc=nopen_recovery_open_bounded(&state->backing,backend,
                                       kCapacityMiB,mode,budget);
+    } else {
+        // Default: GPU OpenCL commands run in a separate EXEC-isolated
+        // process. Each kernel block request has a bounded user-space
+        // response deadline. The worker's path is explicit and absolute.
+        const char* worker=getenv("NOPEN_UBLK_WORKER_BIN");
+        if(!worker || worker[0]!='/')rc=-EINVAL;
+        else rc=nopen_isolated_open(&state->isolated,backend,kCapacityMiB,
+                                    2000,worker);
+    }
     if(rc!=0) {
         delete state;
         return rc;
@@ -109,13 +123,14 @@ void close_target(const ublksrv_dev* dev) {
     auto* state=static_cast<NopenTarget*>(dev->tgt.tgt_data);
     if(state) {
         nopen_recovery_close(state->backing);
+        nopen_isolated_close(state->isolated);
         delete state;
     }
 }
 int on_io(const ublksrv_queue* q,const ublk_io_data* io) {
     if(!q || !io || !io->iod) return -EINVAL;
     auto* state=static_cast<NopenTarget*>(q->dev->tgt.tgt_data);
-    if(!state || !state->backing) {
+    if(!state || (!state->backing && !state->isolated)) {
         ublksrv_complete_io(q,io->tag,-EIO);
         return 0;
     }
@@ -128,10 +143,12 @@ int on_io(const ublksrv_queue* q,const ublk_io_data* io) {
     if(buf && bytes && bytes<=NOPEN_BLK_MAX_BYTES) {
         switch(op) {
             case UBLK_IO_OP_READ:
-                rc=nopen_recovery_read(state->backing,offset,buf,bytes);
+                rc=state->isolated?nopen_isolated_read(state->isolated,offset,buf,bytes):
+                   nopen_recovery_read(state->backing,offset,buf,bytes);
                 break;
             case UBLK_IO_OP_WRITE:
-                rc=nopen_recovery_write(state->backing,offset,buf,bytes);
+                rc=state->isolated?nopen_isolated_write(state->isolated,offset,buf,bytes):
+                   nopen_recovery_write(state->backing,offset,buf,bytes);
                 break;
             // FLUSH is deliberately rejected; this volatile GPU memory has no
             // device-reset durability or stable secondary authoritative copy.
