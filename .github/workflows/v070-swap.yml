@@ -21,6 +21,7 @@ jobs:
           bash -n v070/tools/test_service_vm.sh
           bash -n v070/tools/test_shadow_vm.sh
           bash -n v070/tools/test_shadow_swap_vm.sh
+          bash -n v070/tools/pilot_pressure.sh
       - name: Confirm no unconsented swap or zram modification
         run: |
           python3 v070/tests/test_swap_policy.py v070/tools/vram_swap_lab.sh
