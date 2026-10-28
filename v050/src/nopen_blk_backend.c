@@ -5,6 +5,8 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <inttypes.h>
 #include <string.h>
 
 /* This code is a bounded transport backend, not a kernel-side reclaim hook.
@@ -37,7 +39,7 @@ static int range(nopen_blk_backend *b,uint64_t offset,size_t bytes,size_t *first
 int nopen_blk_open(nopen_blk_backend **out,nopen_backend backend,size_t mib) {
     if(!out)return -EINVAL;
     *out=NULL;
-    if(mib<1||mib>256 || (backend!=NOPEN_STORE_MOCK && backend!=NOPEN_STORE_OPENCL))
+    if(mib<1||mib>4096 || (backend!=NOPEN_STORE_MOCK && backend!=NOPEN_STORE_OPENCL))
         return -EINVAL;
     nopen_blk_backend *b=calloc(1,sizeof(*b));
     if(!b)return -ENOMEM;
@@ -85,6 +87,10 @@ int nopen_blk_write(nopen_blk_backend *b,uint64_t off,const void *src,size_t len
     /* Atomic metadata only on success. On backend failure GPU content might
      * have changed partially. Fail closed: all targeted pages are POISONED. */
     if(nopen_store_write_pages(b->store,first,src,count)!=0) {
+        fprintf(stderr,"NOPEN_GPU_TRANSFER_FATAL op=WRITE offset=%" PRIu64
+                " bytes=%zu page=%zu store_error=%s\n",
+                off,len,first,nopen_store_last_error(b->store));
+        fflush(stderr);
         for(size_t i=0;i<count;i++)b->meta[first+i].state=BLOCK_POISONED;
         pthread_mutex_unlock(&b->lock);
         return fail(b,"GPU write failure; affected range poisoned",EIO);
@@ -117,6 +123,10 @@ int nopen_blk_read(nopen_blk_backend *b,uint64_t off,void *dst,size_t len) {
         while(i<count && b->meta[first+i].state==BLOCK_VALID)i++;
         if(nopen_store_read_pages(b->store,first+start,
                     b->staging+start*NOPEN_PAGE_SIZE,i-start)!=0) {
+            fprintf(stderr,"NOPEN_GPU_TRANSFER_FATAL op=READ offset=%" PRIu64
+                    " bytes=%zu page=%zu count=%zu store_error=%s\n",
+                    off,len,first+start,i-start,nopen_store_last_error(b->store));
+            fflush(stderr);
             pthread_mutex_unlock(&b->lock);
             return fail(b,"GPU read failure; caller unchanged",EIO);
         }
