@@ -15,6 +15,7 @@ import time
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]/"v060"/"tools"))
 from game_baseline import family, memory_available, amd_counters  # noqa: E402
+from find_bannerlord import find_game_pid
 
 def swap_snapshot(dev: str) -> tuple[bool,int,int]:
     all_used=0
@@ -35,13 +36,18 @@ def swap_snapshot(dev: str) -> tuple[bool,int,int]:
 
 def main(argv: list[str]|None=None) -> int:
     ap=argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--pid",type=int,required=True)
+    ap.add_argument("--pid",default="auto",help="actual Bannerlord game PID or auto (default); excludes Steam/TaleWorlds launcher")
     ap.add_argument("--mode",choices=("off","on"),required=True)
     ap.add_argument("--duration-seconds",type=int,default=120)
     ap.add_argument("--interval-ms",type=int,default=1000)
     ap.add_argument("--device",default="/dev/ublkb23")
     ap.add_argument("--csv",type=Path,required=True)
     opts=ap.parse_args(argv)
+    try:
+        opts.pid=find_game_pid() if opts.pid=="auto" else int(opts.pid)
+    except (ValueError, OSError) as exc:
+        print(f"GAME_PROBE_REFUSED Bannerlord_pid={exc}",file=sys.stderr)
+        return 3
     if(opts.pid<2 or not opts.device.startswith("/dev/ublkb") or
        opts.duration_seconds<1 or opts.duration_seconds>1800 or
        opts.interval_ms<250 or opts.interval_ms>5000):
