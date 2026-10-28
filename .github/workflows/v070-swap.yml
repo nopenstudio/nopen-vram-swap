@@ -72,7 +72,10 @@ jobs:
           sudo env GITHUB_ACTIONS=true NOPEN_ISOLATED_VM_TEST=I_ACKNOWLEDGE_DISPOSABLE_VM \
             bash v070/tools/test_btrfs_vm.sh \
               "$GITHUB_WORKSPACE/build-v070/nopen-test-shadow" \
-              "$GITHUB_WORKSPACE/build-v070/v060/nopen-isolated-worker"
+              "$GITHUB_WORKSPACE/build-v070/v060/nopen-isolated-worker" \
+              "$GITHUB_WORKSPACE/v070/tools/test_shadow_swap_vm.sh" \
+              "$GITHUB_WORKSPACE/build-v070/nopen-v070-ublk" \
+              "$GITHUB_WORKSPACE/build-v070/ublksrv-upstream/ublk"
       - name: Root systemd service cgroup outlives user login lifecycle
         if: steps.ublk.outputs.available == 'true'
         timeout-minutes: 3
