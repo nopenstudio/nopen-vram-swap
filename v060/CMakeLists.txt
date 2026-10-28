@@ -33,3 +33,9 @@ add_test(NAME v060_userspace_watchdog_timeout_and_proof
     "${CMAKE_CURRENT_LIST_DIR}/tools/watchdog.py" $<TARGET_FILE:nopen-watchdog-fixture>)
 set_tests_properties(v060_userspace_watchdog_timeout_and_proof PROPERTIES
     PASS_REGULAR_EXPRESSION "WATCHDOG_TEST_PASS" TIMEOUT 12)
+
+add_test(NAME v060_readonly_game_baseline_samples_and_preserves_csv
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/tests/test_baseline.py"
+    "${CMAKE_CURRENT_LIST_DIR}/tools/game_baseline.py")
+set_tests_properties(v060_readonly_game_baseline_samples_and_preserves_csv PROPERTIES
+    PASS_REGULAR_EXPRESSION "BASELINE_TEST_PASS" TIMEOUT 10)
