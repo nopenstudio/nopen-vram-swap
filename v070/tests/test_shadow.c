@@ -7,6 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/statfs.h>
+#include <sys/ioctl.h>
+#include <linux/fs.h>
 #include <unistd.h>
 #define P NOPEN_PAGE_SIZE
 #define PAGECOUNT 1024u
@@ -29,6 +32,20 @@ int main(int argc,char **argv) {
     unsigned char expected[PAGECOUNT*P]={0},read_buf[16u*P],src[16u*P];
     ASSERT(nopen_shadow_open(&s,NOPEN_STORE_MOCK,4,500,argv[1],path)==0);
     ASSERT(s!=NULL);
+    struct statfs filesystem={0};
+    ASSERT(statfs(path,&filesystem)==0);
+    if((unsigned long)filesystem.f_type==0x9123683eUL) {
+        /* Runtime proof, not just source-code string search: the actual
+         * new inode on Btrfs must have COW/compression disabled. */
+        int fd=open(path,O_RDONLY|O_CLOEXEC);
+        ASSERT(fd>=0);
+        int flags=0;
+        ASSERT(ioctl(fd,FS_IOC_GETFLAGS,&flags)==0);
+        ASSERT((flags&FS_NOCOW_FL)!=0);
+        ASSERT((flags&FS_COMPR_FL)==0);
+        close(fd);
+        puts("V070_BTRFS_NOCOW_FLAG_PASS actual_inode_nocow=YES compression=NO");
+    }
     nopen_shadow *duplicate=NULL;
     ASSERT(nopen_shadow_open(&duplicate,NOPEN_STORE_MOCK,4,500,argv[1],path)!=0);
     /* O_EXCL rejects duplicate without damaging the original GPU/device. */
