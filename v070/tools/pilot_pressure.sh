@@ -10,8 +10,16 @@ state="/run/nopen-v070"
   { echo "V070_PRESSURE_REFUSED run via sudo" >&2; exit 2; }
 [[ "$(printenv NOPEN_V070_PILOT_ACK || :)" == "I_ACCEPT_64MIB_KERNEL_GPU_SWAP_RISK" ]] ||
   { echo "V070_PRESSURE_REFUSED explicit physical pilot consent required" >&2; exit 2; }
-[[ -r "$state/capacity" && "$(cat "$state/capacity")" == "64" ]] ||
-  { echo "V070_PRESSURE_REFUSED active pilot capacity must be 64MiB" >&2; exit 2; }
+if [[ ! -r "$state/capacity" ]]; then
+  echo "V070_PRESSURE_REFUSED pilot not started; first run:" >&2
+  echo "sudo env NOPEN_V070_PILOT_ACK=I_ACCEPT_64MIB_KERNEL_GPU_SWAP_RISK bash v070/tools/vram_swap_lab.sh start-pilot 64" >&2
+  echo "Then verify V070_SWAP_ACTIVE before executing pilot_pressure.sh" >&2
+  exit 2
+fi
+if [[ "$(cat "$state/capacity")" != "64" ]]; then
+  echo "V070_PRESSURE_REFUSED capacity mismatch; expected 64MiB pilot" >&2
+  exit 2
+fi
 [[ -b "$device" && -f /sys/fs/cgroup/cgroup.controllers ]] || exit 2
 grep -qw memory /sys/fs/cgroup/cgroup.controllers ||
   { echo "V070_PRESSURE_REFUSED cgroup-v2 memory controller unavailable" >&2; exit 2; }
