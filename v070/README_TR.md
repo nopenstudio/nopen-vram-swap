@@ -1,3 +1,31 @@
+# Btrfs SSD yedeği desteği — 28 Ekim 2026
+
+Garuda Btrfs üzerinde 64MiB fiziksel pilotun eski sürümde verdiği `V070_REFUSED SSD shadow filesystem btrfs not approved` hatası giderildi. **Bu hata veri aktarımından değil, dosya sistemi izin listesinden kaynaklandı.**
+
+- Pilot artık `/var/lib/nopen-v070/shadow-subvolume` adında **ayrı Btrfs alt birimi** oluşturur veya mevcut ayrı alt birimi doğrular. Ana kök alt birimin anlık görüntüsü Nopen yedeğinin içeriğini kendisine kopyalamaz; Nopen alt biriminin doğrudan snapshot'ını almak veya reflink oluşturmak **yasaktır**.
+- `nopen_shadow_open()` yepyeni boş `O_EXCL` yedek dosyasına, disk blokları önceden ayrılmadan **`FS_NOCOW_FL`** uygular; kernel ioctl ile gerçekten verildiğini ve sıkıştırma bayrağının bulunmadığını kontrol eder. Ardından tüm 4KiB sayfalarını ön tahsis edip sıfır yazar ve `O_DIRECT | O_DSYNC` kullanır. Bu kontroller başarısız olursa `swapon` yapılmaz.
+- Btrfs dosyasını Linux'a doğrudan swapfile olarak vermiyoruz; Linux'un gördüğü swap cihazı yine `/dev/ublkb23`. Btrfs dosyası Nopen GPU blok motorunun ayrı **disk yedeğidir**. Böylece Linux'un Btrfs swapfile kısıtlarıyla aynı şey değildir.
+- Btrfs üzerindeki gerçek `NOCOW` dosyasıyla 1.024 sayfalık mock GPU hata/kurtarma testi ve üst alt birim snapshot'ının veri yalıtımı GitHub'ın geçici Btrfs test makinesinde doğrulandı. Ayrıca **gerçek çekirdek SWAP-in/out + işçi ölümü** senaryosu Btrfs yedeği üzerinde ayrı CI testine eklendi; yalnızca CI başarı kaydı varsa geçtiği kabul edilir.
+- **Kalan risk:** Btrfs NOCOW, kernel'in doğrudan bellek geri kazanımı sırasında disk I/O ve AMDGPU'nun kilitlenmeyeceğini kanıtlamaz. Dosya sistemi metaverisi, kullanıcı alanındaki Nopen servisi ve OpenCL hâlâ çekirdeğin reclaim yolu üzerinde çalışır. Genel `start` blokajı sürmektedir; yalnızca açık izinle 64MiB `start-pilot` kullanılabilir.
+
+Önerilen sıra (kaynak güncellendikten, derleme ve testler geçtikten sonra):
+
+~~~bash
+cd ~/nopen-v070
+git pull --ff-only
+bash v070/tools/build_ublk.sh
+ctest --test-dir build-v070 --output-on-failure
+sudo env NOPEN_V070_PILOT_ACK=I_ACCEPT_64MIB_KERNEL_GPU_SWAP_RISK \
+  bash v070/tools/vram_swap_lab.sh start-pilot 64
+# Yalnızca V070_SWAP_ACTIVE görülürse:
+sudo env NOPEN_V070_PILOT_ACK=I_ACCEPT_64MIB_KERNEL_GPU_SWAP_RISK \
+  bash v070/tools/pilot_pressure.sh
+sudo bash v070/tools/vram_swap_lab.sh stop
+~~~
+
+Btrfs için `chattr +C /` ya da sistem genelinde `nodatacow` yapılmamalı; mevcut disk bölümü biçimlendirilmemeli. Nopen yalnızca kendi yeni yedek dosyasının özelliklerini değiştirir.
+
+---
 # ÖNEMLİ — v0.7 fiziksel kernel SWAP güvenlik engeli (28 Ekim 2026)
 
 **RX 9060 XT gerçek sistem SWAP testinde kernel `Read-error on swap-device` hataları görüldü ve sistem kullanılamaz duruma geldi. Fiziksel `start` komutu sonraki testler için kodda geçici olarak engellendi.** `stop` ve `status` komutları korunmuştur. Sorun çözülene kadar tekrar `swapon` çalıştırmayın.
