@@ -20,6 +20,7 @@ jobs:
           bash -n v070/tools/build_ublk.sh
           bash -n v070/tools/test_service_vm.sh
           bash -n v070/tools/test_shadow_vm.sh
+          bash -n v070/tools/test_shadow_swap_vm.sh
       - name: Confirm no unconsented swap or zram modification
         run: |
           python3 v070/tests/test_swap_policy.py v070/tools/vram_swap_lab.sh
@@ -82,6 +83,16 @@ jobs:
           bash -n v070/tools/test_shadow_vm.sh
           sudo env GITHUB_ACTIONS=true NOPEN_ISOLATED_VM_TEST=I_ACKNOWLEDGE_DISPOSABLE_VM \
             bash v070/tools/test_shadow_vm.sh \
+              "$GITHUB_WORKSPACE/build-v070/nopen-v070-ublk" \
+              "$GITHUB_WORKSPACE/build-v070/ublksrv-upstream/ublk" \
+              "$GITHUB_WORKSPACE/build-v070/v060/nopen-isolated-worker"
+      - name: Kernel swap-in after GPU-worker loss using pre-acknowledged disk shadow
+        if: steps.ublk.outputs.available == 'true'
+        timeout-minutes: 4
+        run: |
+          bash -n v070/tools/test_shadow_swap_vm.sh
+          sudo env GITHUB_ACTIONS=true NOPEN_ISOLATED_VM_TEST=I_ACKNOWLEDGE_DISPOSABLE_VM \
+            bash v070/tools/test_shadow_swap_vm.sh \
               "$GITHUB_WORKSPACE/build-v070/nopen-v070-ublk" \
               "$GITHUB_WORKSPACE/build-v070/ublksrv-upstream/ublk" \
               "$GITHUB_WORKSPACE/build-v070/v060/nopen-isolated-worker"
