@@ -39,11 +39,13 @@ int main(int argc,char **argv) {
     nopen_backend backend=0;
     nopen_recovery_mode mode=NOPEN_RECOVERY_NO_MIRROR;
     size_t operations=1000,inject_after=500;
+    int rebuild=0;
     for(int i=1;i<argc;i++) {
+        if(strcmp(argv[i],"--rebuild-after-loss")==0) {rebuild=1;continue;}
         if(strcmp(argv[i],"--help")==0) {
             puts("Nopen v0.6 GPU loss simulation (NOT an actual GPU reset): "
                  "--backend mock|opencl --mode mirror|failclosed "
-                 "--operations 100..20000 --inject-loss-after 1..20000");
+                 "--operations 100..20000 --inject-loss-after 1..20000 [--rebuild-after-loss]");
             return 0;
         }
         if(i+1>=argc)return 2;
@@ -66,7 +68,8 @@ int main(int argc,char **argv) {
             *value=(size_t)n;
         }
     }
-    if(!backend || operations<100 || operations>20000 ||
+    if(!backend || (rebuild && mode!=NOPEN_RECOVERY_HOST_MIRROR) ||
+       operations<100 || operations>20000 ||
        inject_after==0 || inject_after>=operations || geteuid()==0 ||
        !safe_swaps()) {
         fputs("RECOVERY_LAB_REFUSED invalid backend/options, root or active NBD swap\n",stderr);
@@ -87,6 +90,7 @@ int main(int argc,char **argv) {
             const int rc=nopen_recovery_device_lost(r);
             if(mode==NOPEN_RECOVERY_NO_MIRROR && rc!=-EIO)goto done;
             if(mode==NOPEN_RECOVERY_HOST_MIRROR && rc!=0)goto done;
+            if(rebuild && nopen_recovery_rebuild_gpu(r)!=0)goto done;
         }
         const size_t page=(size_t)(next(&seed)%ARENA_PAGES);
         const int writing=(next(&seed)&1u)!=0;
@@ -125,7 +129,8 @@ int main(int argc,char **argv) {
     if(nopen_recovery_get_stats(r,&stats)!=0 ||
        stats.device_loss_events!=1 ||
        stats.state!=(mode==NOPEN_RECOVERY_NO_MIRROR?
-            NOPEN_RECOVERY_FAILED_CLOSED:NOPEN_RECOVERY_CPU_FALLBACK) ||
+            NOPEN_RECOVERY_FAILED_CLOSED:(rebuild?NOPEN_RECOVERY_GPU_ACTIVE:NOPEN_RECOVERY_CPU_FALLBACK)) ||
+       (rebuild && (stats.rebuild_successes!=1 || stats.rebuild_verified_pages!=ARENA_PAGES)) ||
        (mode==NOPEN_RECOVERY_NO_MIRROR && denied!=operations-inject_after))
         goto done;
     struct rusage usage;
@@ -133,12 +138,14 @@ int main(int argc,char **argv) {
     if(elapsed<=0 || getrusage(RUSAGE_SELF,&usage)!=0)goto done;
     printf("RECOVERY_RESULT version=0.6.0-dev backend=%s mode=%s operations=%zu "
            "fault_injection=simulated_notification_ONLY real_gpu_reset=NO "
-           "successful=%zu denied=%zu reads=%zu writes=%zu "
+           "rebuild_after_loss=%d rebuild_successes=%"PRIu64" rebuild_verified_pages=%"PRIu64" "
+           "operations=%zu successful=%zu denied=%zu reads=%zu writes=%zu "
            "verified_final_pages=%u mirror_bytes=%"PRIu64" "
            "fallback_reads=%"PRIu64" fallback_writes=%"PRIu64" "
            "elapsed_s=%.6f process_maxrss_kib=%ld no_global_swap=YES\n",
            backend==NOPEN_STORE_MOCK?"mock":"opencl",
            mode==NOPEN_RECOVERY_HOST_MIRROR?"mirror":"failclosed",
+           rebuild,stats.rebuild_successes,stats.rebuild_verified_pages,
            operations,successful,denied,reads,writes,
            mode==NOPEN_RECOVERY_HOST_MIRROR?ARENA_PAGES:0u,
            stats.mirror_bytes,stats.fallback_reads,stats.fallback_writes,
