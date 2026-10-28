@@ -171,7 +171,11 @@ int on_io(const ublksrv_queue* q,const ublk_io_data* io) {
     size_t bytes=static_cast<size_t>(iod->nr_sectors)*512u;
     void* buf=ublksrv_queue_get_io_buf(q,io->tag);
     int rc=-EOPNOTSUPP;
-    if(buf && bytes && bytes<=NOPEN_BLK_MAX_BYTES) {
+    /* OpenCL writes are synchronous and complete when acknowledged.
+     * FLUSH does not promise persistence across GPU resets/reboots; it only
+     * acknowledges completion of earlier blocking I/O in volatile VRAM. */
+    if(op==UBLK_IO_OP_FLUSH && bytes==0)rc=0;
+    else if(buf && bytes && bytes<=NOPEN_BLK_MAX_BYTES) {
         switch(op) {
             case UBLK_IO_OP_READ:
                 rc=state->isolated?nopen_isolated_read(state->isolated,offset,buf,bytes):
@@ -181,8 +185,7 @@ int on_io(const ublksrv_queue* q,const ublk_io_data* io) {
                 rc=state->isolated?nopen_isolated_write(state->isolated,offset,buf,bytes):
                    nopen_recovery_write(state->backing,offset,buf,bytes);
                 break;
-            // FLUSH is deliberately rejected; this volatile GPU memory has no
-            // device-reset durability or stable secondary authoritative copy.
+            // DISCARD and other unsupported operations return EOPNOTSUPP.
             default:
                 rc=-EOPNOTSUPP;
         }
