@@ -46,3 +46,9 @@ set_tests_properties(v060_readonly_game_baseline_samples_and_preserves_csv PROPE
 add_test(NAME v060_two_phase_gpu_rebuild_and_concurrent_io COMMAND nopen-test-rebuild)
 set_tests_properties(v060_two_phase_gpu_rebuild_and_concurrent_io PROPERTIES
   PASS_REGULAR_EXPRESSION "REBUILD_TEST_PASS" TIMEOUT 30)
+
+add_test(NAME v060_mock_gpu_rehydration_full_verify COMMAND nopen-recovery-lab
+ --backend mock --mode mirror --operations 1000 --inject-loss-after 500
+ --rebuild-after-loss)
+set_tests_properties(v060_mock_gpu_rehydration_full_verify PROPERTIES
+ PASS_REGULAR_EXPRESSION "RECOVERY_LAB_PASS" TIMEOUT 15)
