@@ -12,7 +12,16 @@ target_compile_options(nopen_recovery PRIVATE -Wall -Wextra -Wpedantic -Werror)
 add_executable(nopen-test-recovery tests/test_recovery.c)
 target_link_libraries(nopen-test-recovery PRIVATE nopen_recovery)
 target_compile_options(nopen-test-recovery PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_executable(nopen-recovery-lab src/nopen_recovery_lab.c)
+target_link_libraries(nopen-recovery-lab PRIVATE nopen_recovery)
+target_compile_options(nopen-recovery-lab PRIVATE -Wall -Wextra -Wpedantic -Werror)
 enable_testing()
 add_test(NAME v060_gpu_loss_fail_closed_and_cpu_mirror COMMAND nopen-test-recovery)
 set_tests_properties(v060_gpu_loss_fail_closed_and_cpu_mirror PROPERTIES
   PASS_REGULAR_EXPRESSION "RECOVERY_TEST_PASS")
+add_test(NAME v060_mock_mirror_recovery_lab COMMAND nopen-recovery-lab
+  --backend mock --mode mirror --operations 1000 --inject-loss-after 500)
+add_test(NAME v060_mock_failclosed_recovery_lab COMMAND nopen-recovery-lab
+  --backend mock --mode failclosed --operations 1000 --inject-loss-after 500)
+set_tests_properties(v060_mock_mirror_recovery_lab v060_mock_failclosed_recovery_lab
+  PROPERTIES PASS_REGULAR_EXPRESSION "RECOVERY_LAB_PASS" TIMEOUT 15)
