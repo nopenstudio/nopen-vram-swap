@@ -32,7 +32,7 @@ with TemporaryDirectory() as td:
     try:
         find_game_pid(root)
     except ValueError as exc:
-        assert "no real Bannerlord" in str(exc)
+        assert "no Bannerlord game process" in str(exc)
     else:
         raise AssertionError("accepted launcher process as active game")
 
