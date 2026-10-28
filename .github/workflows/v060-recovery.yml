@@ -58,3 +58,38 @@ jobs:
             -Iv012/include -c v012/src/nopen_page_core.c -o /tmp/nopen-page-core.o
           test -z "$(nm -u /tmp/nopen-vm-policy.o)"
           test -z "$(nm -u /tmp/nopen-page-core.o)"
+
+  ublk-recovery-link:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned upstream libublksrv build tools (never run device)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ liburing-dev autoconf automake libtool pkg-config \
+            ocl-icd-opencl-dev opencl-headers
+          git clone --filter=blob:none https://github.com/ublk-org/ublksrv.git /tmp/ublksrv
+          git -C /tmp/ublksrv checkout 6d0d922614ec18e6f2b5d476af8d540a1d9c1de8
+          cd /tmp/ublksrv
+          autoreconf -fi
+          ./configure --without-libnfs --without-libiscsi --without-gnutls
+          make -C lib -j2
+      - name: Compile and link recovery-aware kernel ublk adapter without executing
+        run: |
+          cmake -S v060 -B build-v060-ublk -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+          cmake --build build-v060-ublk --parallel
+          g++ -std=c++20 -Wall -Wextra \
+            -I/tmp/ublksrv/include -I/tmp/ublksrv/targets/include \
+            -Iv060/include -Iv050/include -Iv012/include -I/tmp/ublksrv \
+            /tmp/ublksrv/targets/ublksrv_tgt.cpp \
+            v060/experimental/ublk/nopen_ublk_recovery_target.cpp \
+            build-v060-ublk/libnopen_recovery.a \
+            build-v060-ublk/v050/libnopen_blk_backend.a \
+            build-v060-ublk/v050/v040/v030/v012/libnopen_vram_store.a \
+            build-v060-ublk/v050/v040/v030/v012/libnopen_page_core.a \
+            /tmp/ublksrv/lib/.libs/libublksrv.a \
+            -luring -lOpenCL -lpthread -ldl -o /tmp/nopen-v060-ublk-recovery
+          test -x /tmp/nopen-v060-ublk-recovery
+          ! grep -En 'swapon\(|swapoff\(|NBD_DO_IT' \
+            v060/experimental/ublk/nopen_ublk_recovery_target.cpp
+          echo "UBLK_RECOVERY_LINK_PASS linked=YES executed=NO kernel_device_created=NO"
