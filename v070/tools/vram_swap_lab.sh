@@ -8,7 +8,8 @@ capacity="${2:-}"
 build="$repo/build-v070"
 state="/run/nopen-v070"
 logdir="/var/log/nopen-v070"
-shadowdir="/var/lib/nopen-v070"
+shadowbase="/var/lib/nopen-v070"
+shadowdir="$shadowbase"
 dev="/dev/ublkb23"
 id=23
 priority=200
@@ -77,7 +78,7 @@ if [[ "$action" == stop ]]; then
     shadowfile="$(cat "$state/shadow-file")"
     # Delete only the exact dedicated persistent shadow AFTER successful
     # swapoff and kernel device teardown. Never delete active swap backing.
-    if [[ "$shadowfile" == "$shadowdir/"* && -f "$shadowfile" ]]; then
+    if [[ "$shadowfile" == "$shadowbase/"* && "$shadowfile" == */shadow-*.bin && -f "$shadowfile" ]]; then
       rm -- "$shadowfile"
     fi
   fi
@@ -132,21 +133,45 @@ if [[ "$(printenv NOPEN_V070_ACCEPT_RISK || :)" != "I_ACCEPT_GPU_SWAP_REBOOT" ]]
   [[ "$approval" == EVET ]] || { echo "V070_REFUSED consent not received"; exit 2; }
 fi
 install -d -m 0700 "$state"
-install -d -m 0700 "$shadowdir"
-# Reject if the dedicated SSD shadow cannot fit plus a 256MiB reserve.
-# SSD shadow WRITE-through is intentionally slower than pure VRAM.
+install -d -m 0700 "$shadowbase"
+shadowtype="$(stat -f -c '%T' "$shadowbase")"
+case "$shadowtype" in
+  ext2/ext3|xfs)
+    echo "V070_SHADOW_FILESYSTEM fs=$shadowtype mode=direct_disk" ;;
+  btrfs)
+    # The root/home Btrfs subvolume may be snapshotted by Snapper.
+    # A nested child subvolume is NOT included as copied data in a parent
+    # snapshot. This shadow MUST NOT itself be snapshotted/reflinked while
+    # the active swap device depends on its physical extents.
+    command -v btrfs >/dev/null ||
+      { echo "V070_REFUSED btrfs-progs not installed" >&2; exit 2; }
+    shadowdir="$shadowbase/shadow-subvolume"
+    if [[ -e "$shadowdir" ]]; then
+      if ! btrfs subvolume show "$shadowdir" >/dev/null 2>&1; then
+        echo "V070_REFUSED shadow path exists but is not a Btrfs subvolume" >&2
+        exit 2
+      fi
+    else
+      btrfs subvolume create "$shadowdir"
+    fi
+    chmod 0700 "$shadowdir"
+    [[ "$(stat -f -c '%T' "$shadowdir")" == btrfs ]] &&
+      btrfs subvolume show "$shadowdir" >/dev/null ||
+      { echo "V070_REFUSED cannot verify isolated Btrfs shadow subvolume" >&2; exit 2; }
+    echo "V070_SHADOW_FILESYSTEM fs=btrfs mode=isolated_nocow_subvolume snapshot_of_shadow=FORBIDDEN"
+    ;;
+  *)
+    echo "V070_REFUSED SSD shadow filesystem $shadowtype not approved" >&2
+    exit 2 ;;
+esac
+# Require enough real block storage for the full write-through backing file
+# and reserve; do not rely on GPU VRAM or a RAM-backed tmpfs.
 free_kib="$(df -Pk "$shadowdir" | awk 'NR==2{print $4}')"
 if [[ ! "$free_kib" =~ ^[0-9]+$ ]] ||
    (( free_kib < capacity * 1024 + 262144 )); then
   echo "V070_PILOT_REFUSED insufficient independent SSD capacity" >&2
   exit 2
 fi
-shadowtype="$(stat -f -c '%T' "$shadowdir")"
-case "$shadowtype" in
-  ext2/ext3|xfs) ;;
-  *) echo "V070_REFUSED SSD shadow filesystem $shadowtype not approved (requires ext4/xfs O_DIRECT preallocation)" >&2
-     exit 2 ;;
-esac
 shadowfile="$shadowdir/shadow-$(date +%Y%m%d-%H%M%S)-${BASHPID}.bin"
 [[ ! -e "$shadowfile" ]] || { echo "V070_REFUSED shadow file exists" >&2; exit 2; }
 printf '%s\n' "$shadowfile" > "$state/shadow-file"
