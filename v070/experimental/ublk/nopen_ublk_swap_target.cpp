@@ -14,6 +14,7 @@
 extern "C" {
 #include "nopen_recovery.h"
 #include "nopen_isolated_io.h"
+#include "nopen_shadow.h"
 }
 #include <cerrno>
 #include <climits>
@@ -31,6 +32,7 @@ constexpr unsigned kPageSize = 4096u;
 struct NopenTarget {
     nopen_recovery* backing=nullptr;
     nopen_isolated_io* isolated=nullptr;
+    nopen_shadow* shadow=nullptr;
 };
 bool isolated_virtual_machine() {
     FILE* f=fopen("/sys/class/dmi/id/product_name","r");
@@ -125,8 +127,19 @@ int open_target(ublksrv_dev* dev,int,int,char**) {
         delete state;
         return -EINVAL;
     }
+    const char* shadow_path=getenv("NOPEN_UBLK_SHADOW_FILE");
+    if(physical_lab && (!shadow_path || shadow_path[0]!='/')) {
+        fprintf(stderr,"NOPEN_V070_REFUSED independent durable GPU backup required\n");
+        delete state;
+        return -EINVAL;
+    }
     int rc=0;
-    if(mode==NOPEN_RECOVERY_HOST_MIRROR) {
+    if(shadow_path) {
+        const char* worker=getenv("NOPEN_UBLK_WORKER_BIN");
+        if(!worker || worker[0]!='/')rc=-EINVAL;
+        else rc=nopen_shadow_open(&state->shadow,backend,capacity_mib,
+                                  2000,worker,shadow_path);
+    } else if(mode==NOPEN_RECOVERY_HOST_MIRROR) {
         // Explicitly expensive CPU fallback lab only: no RAM savings.
         rc=nopen_recovery_open_bounded(&state->backing,backend,
                                       capacity_mib,mode,budget);
@@ -155,13 +168,14 @@ void close_target(const ublksrv_dev* dev) {
     if(state) {
         nopen_recovery_close(state->backing);
         nopen_isolated_close(state->isolated);
+        nopen_shadow_close(state->shadow);
         delete state;
     }
 }
 int on_io(const ublksrv_queue* q,const ublk_io_data* io) {
     if(!q || !io || !io->iod) return -EINVAL;
     auto* state=static_cast<NopenTarget*>(q->dev->tgt.tgt_data);
-    if(!state || (!state->backing && !state->isolated)) {
+    if(!state || (!state->backing && !state->isolated && !state->shadow)) {
         ublksrv_complete_io(q,io->tag,-EIO);
         return 0;
     }
@@ -178,11 +192,13 @@ int on_io(const ublksrv_queue* q,const ublk_io_data* io) {
     else if(buf && bytes && bytes<=NOPEN_BLK_MAX_BYTES) {
         switch(op) {
             case UBLK_IO_OP_READ:
-                rc=state->isolated?nopen_isolated_read(state->isolated,offset,buf,bytes):
+                rc=state->shadow?nopen_shadow_read(state->shadow,offset,buf,bytes):
+                   state->isolated?nopen_isolated_read(state->isolated,offset,buf,bytes):
                    nopen_recovery_read(state->backing,offset,buf,bytes);
                 break;
             case UBLK_IO_OP_WRITE:
-                rc=state->isolated?nopen_isolated_write(state->isolated,offset,buf,bytes):
+                rc=state->shadow?nopen_shadow_write(state->shadow,offset,buf,bytes):
+                   state->isolated?nopen_isolated_write(state->isolated,offset,buf,bytes):
                    nopen_recovery_write(state->backing,offset,buf,bytes);
                 break;
             // DISCARD and other unsupported operations return EOPNOTSUPP.
