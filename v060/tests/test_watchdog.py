@@ -4,12 +4,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-if len(sys.argv)!=4:
+if len(sys.argv)!=3:
     raise SystemExit("test_watchdog.py WATCHDOG FIXTURE")
 tool=Path(sys.argv[1]).resolve()
 fixture=Path(sys.argv[2]).resolve()
-# Third arg is the single child-mode parameter.
-extra=sys.argv[3]
 def run(mode:str,expect:int,marker:str)->None:
     cmd=[sys.executable,str(tool),"--binary",str(fixture),
          "--timeout-seconds","1","--grace-seconds","0.1",
