@@ -3,6 +3,9 @@
 **RX 9060 XT gerçek sistem SWAP testinde kernel `Read-error on swap-device` hataları görüldü ve sistem kullanılamaz duruma geldi. Fiziksel `start` komutu sonraki testler için kodda geçici olarak engellendi.** `stop` ve `status` komutları korunmuştur. Sorun çözülene kadar tekrar `swapon` çalıştırmayın.
 
 - Hata raporu: https://github.com/nopenstudio/nopen-vram-swap/issues/7
+- **Yeni kanıt (28 Ekim 21:30):** İlk hata `21:25:14.462` tarihinde `timeout error ... dev ublkb23 ... (WRITE)`. Ardından onlarca bin bastırılmış yazma/okuma hatası, `mm/swapfile.c` uyarısı ve oturum kaybı geldi. `21:25:19` tarihinde systemd, kullanıcı oturumuyla birlikte `nopen-v070-ublk` sürecini de öldürdü; bu ilk yazma zaman aşımından **sonradır**, dolayısıyla ilk tetikleyiciyi kanıtlamaz. GPU firmware reseti bu filtrelenmiş günlüklerde kanıtlanmadı. Fiziksel SWAP testinin kabulü **BAŞARISIZ**; 35/35 mock CI bu sonucu geçersiz kılamaz.
+- Test sonrasında zram kaldı (`/dev/zram0`, `USED 0B`); fiziksel Nopen aygıtı yeniden başlatma sonrasında etkin değil.
+
 - Yeniden başlatmadan sonra salt okunur tanılama: `git pull --ff-only && bash v070/tools/collect_swap_failure.sh`
 - Eski prototipin CI mock SWAP başarısı, gerçek AMDGPU altında swap-in veri kaybı güvenliğini kanıtlamadı.
 - Aşağıdaki fiziksel test talimatları **tarihsel referanstır; geçerli sürümde `start` bilerek reddedilir.**
