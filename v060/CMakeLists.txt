@@ -15,6 +15,9 @@ target_compile_options(nopen-test-recovery PRIVATE -Wall -Wextra -Wpedantic -Wer
 add_executable(nopen-recovery-lab src/nopen_recovery_lab.c)
 target_link_libraries(nopen-recovery-lab PRIVATE nopen_recovery)
 target_compile_options(nopen-recovery-lab PRIVATE -Wall -Wextra -Wpedantic -Werror)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_executable(nopen-watchdog-fixture tests/watchdog_fixture.c)
+target_compile_options(nopen-watchdog-fixture PRIVATE -Wall -Wextra -Wpedantic -Werror)
 enable_testing()
 add_test(NAME v060_gpu_loss_fail_closed_and_cpu_mirror COMMAND nopen-test-recovery)
 set_tests_properties(v060_gpu_loss_fail_closed_and_cpu_mirror PROPERTIES
@@ -25,3 +28,8 @@ add_test(NAME v060_mock_failclosed_recovery_lab COMMAND nopen-recovery-lab
   --backend mock --mode failclosed --operations 1000 --inject-loss-after 500)
 set_tests_properties(v060_mock_mirror_recovery_lab v060_mock_failclosed_recovery_lab
   PROPERTIES PASS_REGULAR_EXPRESSION "RECOVERY_LAB_PASS" TIMEOUT 15)
+add_test(NAME v060_userspace_watchdog_timeout_and_proof
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/tests/test_watchdog.py"
+    "${CMAKE_CURRENT_LIST_DIR}/tools/watchdog.py" $<TARGET_FILE:nopen-watchdog-fixture>)
+set_tests_properties(v060_userspace_watchdog_timeout_and_proof PROPERTIES
+    PASS_REGULAR_EXPRESSION "WATCHDOG_TEST_PASS" TIMEOUT 12)
