@@ -13,7 +13,7 @@ add_executable(nopen-test-shadow tests/test_shadow.c)
 target_link_libraries(nopen-test-shadow PRIVATE nopen_shadow)
 target_compile_options(nopen-test-shadow PRIVATE -Wall -Wextra -Wpedantic -Werror)
 add_test(NAME v070_durable_disk_shadow_survives_gpu_worker_timeout
-  COMMAND nopen-test-shadow $<TARGET_FILE:nopen-isolated-worker>)
+  COMMAND nopen-test-shadow $<TARGET_FILE:nopen-isolated-worker> "${CMAKE_CURRENT_BINARY_DIR}")
 set_tests_properties(v070_durable_disk_shadow_survives_gpu_worker_timeout
   PROPERTIES PASS_REGULAR_EXPRESSION "V070_SHADOW_TEST_PASS" TIMEOUT 30)
 add_executable(nopen-shadow-smoke src/nopen_shadow_smoke.c)
