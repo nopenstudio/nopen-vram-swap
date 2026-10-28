@@ -22,10 +22,11 @@ git -C "$vendor" checkout 6d0d922614ec18e6f2b5d476af8d540a1d9c1de8
 )
 g++ -std=c++20 -Wall -Wextra -Wpedantic \
   -I"$vendor/include" -I"$vendor/targets/include" \
-  -I"$repo/v060/include" -I"$repo/v050/include" -I"$repo/v012/include" \
+  -I"$repo/v070/include" -I"$repo/v060/include" -I"$repo/v050/include" -I"$repo/v012/include" \
   -I"$vendor" \
   "$vendor/targets/ublksrv_tgt.cpp" \
   "$repo/v070/experimental/ublk/nopen_ublk_swap_target.cpp" \
+  "$build/libnopen_shadow.a" \
   "$build/v060/libnopen_isolated_io.a" \
   "$build/v060/libnopen_recovery.a" \
   "$build/v060/v050/libnopen_blk_backend.a" \
