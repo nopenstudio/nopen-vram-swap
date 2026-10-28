@@ -29,6 +29,10 @@ int nopen_shadow_get_stats(nopen_shadow *s,nopen_shadow_stats *out);
 void nopen_shadow_close(nopen_shadow *s);
 /* MOCK-only, test-triggered 10s hang. Returns failure; fallback persists. */
 int nopen_shadow_mock_inject_gpu_hang(nopen_shadow *s);
+/* Lab-only fault injection, safe with real OpenCL: intentionally close/kill
+ * only this process's GPU worker without resetting physical GPU. All pages
+ * must subsequently be served from authoritative O_DIRECT SSD shadow. */
+int nopen_shadow_simulate_gpu_loss(nopen_shadow *s);
 #ifdef __cplusplus
 }
 #endif
