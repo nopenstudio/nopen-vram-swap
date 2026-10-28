@@ -27,6 +27,14 @@ id=27;dev="/dev/ublkb27"; cgroup="/sys/fs/cgroup/nopen-v070-failover-$$"
 [[ ! -e "$dev" && ! -e "$cgroup" ]] || exit 2
 dir="$(mktemp -d /var/tmp/nopen-v070-swapped-shadow-XXXXXX)"
 shadow="$dir/verified-persistent-shadow.bin"
+if [[ -n "${NOPEN_V070_SHADOW_TEST_DIR:-}" ]]; then
+  # Explicit injection for the disposable Btrfs loop filesystem regression.
+  # Never accept this override outside the already-checked temporary CI VM.
+  [[ -d "$NOPEN_V070_SHADOW_TEST_DIR" ]] ||
+    { echo "V070_PAGING_FAILOVER_REFUSED external shadow directory missing" >&2; exit 2; }
+  shadow="$NOPEN_V070_SHADOW_TEST_DIR/verified-persistent-shadow-$.bin"
+  [[ ! -e "$shadow" ]] || exit 2
+fi
 daemon=0;pressure=0;created=0;swap_active=0;group_created=0
 cleanup() {
   if (( pressure>0 )); then
@@ -163,5 +171,7 @@ timeout 15s "$ctl" del -n "$id"
 created=0
 [[ ! -e "$dev" ]] || exit 8
 rmdir "$cgroup";group_created=0
+# Only unlink after successful swapoff and deletion of the kernel device.
+if [[ "$shadow" != "$dir/"* ]]; then rm -f -- "$shadow"; fi
 echo "V070_PAGING_FAILOVER_PASS real_kernel_swap=YES swapout_observed=YES worker_sigkill=YES"
 echo "V070_PAGING_FAILOVER_PASS_AFTER_READ checked_pages=24576 disk_shadow_fallback=YES swapoff=YES device_deleted=YES mock_gpu=YES"
