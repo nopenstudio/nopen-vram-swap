@@ -23,15 +23,10 @@ int main(int argc,char **argv) {
     unsigned char expected[PAGECOUNT*P]={0},read_buf[16u*P],src[16u*P];
     ASSERT(nopen_shadow_open(&s,NOPEN_STORE_MOCK,4,500,argv[1],path)==0);
     ASSERT(s!=NULL);
-    ASSERT(nopen_shadow_open(&s,NOPEN_STORE_MOCK,4,500,argv[1],path)!=0);
-    /* Existing path MUST be rejected without deleting somebody else's data. */
-    ASSERT(access(path,F_OK)==0);
-    /* The rejected second open resets the caller pointer by documented API. */
-    s=NULL; /* Recover pointer through keeping separate primary below: tested below. */
-    /* Test separate successful primary from here with a NEW filename. */
-    char path2[512]={0};
-    ASSERT(snprintf(path2,sizeof(path2),"%s/test-shadow2.bin",directory)>0);
-    ASSERT(nopen_shadow_open(&s,NOPEN_STORE_MOCK,4,500,argv[1],path2)==0);
+    nopen_shadow *duplicate=NULL;
+    ASSERT(nopen_shadow_open(&duplicate,NOPEN_STORE_MOCK,4,500,argv[1],path)!=0);
+    /* O_EXCL rejects duplicate without damaging the original GPU/device. */
+    ASSERT(duplicate==NULL && access(path,F_OK)==0);
     for(size_t p=0;p<PAGECOUNT;p+=16) {
         for(size_t j=0;j<sizeof(src);j++)
             src[j]=(unsigned char)(p*13u+j*7u+(p>>2));
@@ -60,7 +55,7 @@ int main(int argc,char **argv) {
     ASSERT(stats.shadow_reads>=PAGECOUNT/16 && stats.gpu_failures==1);
     ASSERT(stats.backed_bytes==4u*1024u*1024u && !stats.poisoned);
     nopen_shadow_close(s);
-    unlink(path2);unlink(path);rmdir(directory);
+    unlink(path);rmdir(directory);
     puts("V070_SHADOW_TEST_PASS gpu_timeout=YES persisted_pages=1024 "
          "fallback_read=YES fallback_write=YES no_unreadable_acknowledged_pages=YES "
          "real_gpu_reset_tested=NO no_global_swap=YES");
