@@ -1,3 +1,7 @@
+> **Güncel deneysel geliştirme v0.6.0-dev:** [GPU kaybında fail-closed, CPU mirror ve kontrollü OOM testleri](v060/README_TR.md). Gerçek Linux global SWAP henüz etkin değil; ilk kararlı sürüm v1.0 olacaktır.
+
+---
+
 > **Güncel deneysel geliştirme: v0.5.0-dev.** [Linux-zen VM bellek baskısı sensörü ve güvenli entegrasyon kapıları](v050/README_TR.md). İlk adım yalnızca salt okunur gözlem ve bağımsız C11 politikasıdır; çekirdekte SWAP etkin değildir. İlk kararlı sürüm v1.0 olacaktır.
 
 ---

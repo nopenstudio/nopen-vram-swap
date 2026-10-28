@@ -1,3 +1,7 @@
+> **Current experimental line v0.6.0-dev:** [GPU-loss fail-closed recovery, optional CPU mirror and memory budgets](v060/README_TR.md). Global Linux swap remains unverified; first stable release will be v1.0.
+
+---
+
 > **Current experimental lane: v0.5.0-dev.** [Safe Linux VM telemetry and freestanding memory pressure policy](v050/README_TR.md). Read-only kernel-aware userspace prototype, NOT an installed kernel swap module. First stable version targets v1.0.
 
 ---

@@ -1,0 +1,154 @@
+name: v0.6 GPU loss fail-closed recovery (no global swap)
+on:
+  push:
+    branches: ["develop/v0.6.0"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mock-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile v0.6 and all inherited tests
+        run: |
+          cmake -S v060 -B build-v060-mock -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-v060-mock --parallel
+          ctest --test-dir build-v060-mock --output-on-failure
+      - name: Stress fail-closed recovery and retained Linux VM policy
+        run: |
+          ./build-v060-mock/nopen-test-recovery
+          ./build-v060-mock/v050/nopen-vm-test-policy
+      - name: Guard against accidental swap activation or kernel tuning
+        run: |
+          ! grep -En 'swapon\(|swapoff\(|NBD_DO_IT|/proc/sys/vm/|systemctl ' \
+             v060/src/nopen_recovery.c v060/include/nopen_recovery.h
+  opencl-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build prerequisites (no actual AMD GPU in CI)
+        run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev opencl-headers
+      - name: Compile OpenCL backend and execute mock fallback checks
+        run: |
+          cmake -S v060 -B build-v060-opencl -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+          cmake --build build-v060-opencl --parallel
+          ctest --test-dir build-v060-opencl --output-on-failure
+  asan-ubsan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: AddressSanitizer + UndefinedBehaviorSanitizer
+        run: |
+          cmake -S v060 -B build-v060-san -DCMAKE_BUILD_TYPE=Debug -DNOPEN_OPENCL=OFF \
+            -DCMAKE_C_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' \
+            -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+          cmake --build build-v060-san --parallel
+          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 \
+            ctest --test-dir build-v060-san --output-on-failure
+  freestanding-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: VM and pager policies build without GNU/Linux runtime
+        run: |
+          gcc -std=c11 -ffreestanding -fno-builtin -Wall -Wextra -Werror \
+            -Iv050/include -c v050/src/nopen_vm_policy.c -o /tmp/nopen-vm-policy.o
+          gcc -std=c11 -ffreestanding -fno-builtin -Wall -Wextra -Werror \
+            -Iv012/include -c v012/src/nopen_page_core.c -o /tmp/nopen-page-core.o
+          test -z "$(nm -u /tmp/nopen-vm-policy.o)"
+          test -z "$(nm -u /tmp/nopen-page-core.o)"
+
+  ublk-recovery-link:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned upstream libublksrv build tools (never run device)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ liburing-dev autoconf automake libtool pkg-config \
+            ocl-icd-opencl-dev opencl-headers
+          git clone --filter=blob:none https://github.com/ublk-org/ublksrv.git /tmp/ublksrv
+          git -C /tmp/ublksrv checkout 6d0d922614ec18e6f2b5d476af8d540a1d9c1de8
+          cd /tmp/ublksrv
+          autoreconf -fi
+          ./configure --without-libnfs --without-libiscsi --without-gnutls
+          make -C lib -j2
+      - name: Compile and link recovery-aware kernel ublk adapter without executing
+        run: |
+          cmake -S v060 -B build-v060-ublk -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+          cmake --build build-v060-ublk --parallel
+          g++ -std=c++20 -Wall -Wextra \
+            -I/tmp/ublksrv/include -I/tmp/ublksrv/targets/include \
+            -Iv060/include -Iv050/include -Iv012/include -I/tmp/ublksrv \
+            /tmp/ublksrv/targets/ublksrv_tgt.cpp \
+            v060/experimental/ublk/nopen_ublk_recovery_target.cpp \
+            build-v060-ublk/libnopen_isolated_io.a \
+            build-v060-ublk/libnopen_recovery.a \
+            build-v060-ublk/v050/libnopen_blk_backend.a \
+            build-v060-ublk/v050/v040/v030/v012/libnopen_vram_store.a \
+            build-v060-ublk/v050/v040/v030/v012/libnopen_page_core.a \
+            /tmp/ublksrv/lib/.libs/libublksrv.a \
+            -luring -lOpenCL -lpthread -ldl -o /tmp/nopen-v060-ublk-recovery
+          test -x /tmp/nopen-v060-ublk-recovery
+          ! grep -En 'swapon\(|swapoff\(|NBD_DO_IT' \
+            v060/experimental/ublk/nopen_ublk_recovery_target.cpp
+          echo "UBLK_RECOVERY_LINK_PASS linked=YES executed=NO kernel_device_created=NO"
+
+  ublk-kernel-lifecycle-disposable-vm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check disposable runner kernel ublk capability
+        id: kernel
+        shell: bash
+        run: |
+          if [[ -c /dev/ublk-control ]] || sudo modprobe ublk_drv; then
+            if [[ -c /dev/ublk-control ]]; then
+              echo "available=true" >> "$GITHUB_OUTPUT"
+              echo "UBLK_KERNEL_PRESENT=YES"
+            else
+              echo "available=false" >> "$GITHUB_OUTPUT"
+              echo "UBLK_KERNEL_RUNTIME_UNVERIFIED no_control_device=YES"
+            fi
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "UBLK_KERNEL_RUNTIME_UNVERIFIED runner_has_no_ublk_module=YES"
+          fi
+      - name: Validate isolated device-lifecycle script syntax
+        run: bash -n v060/experimental/ublk/test_vm_kernel_lifecycle.sh
+      - name: Build real libublksrv and mock-capable adapter on disposable VM
+        if: steps.kernel.outputs.available == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ liburing-dev autoconf automake libtool pkg-config ocl-icd-opencl-dev opencl-headers
+          git clone --filter=blob:none https://github.com/ublk-org/ublksrv.git /tmp/ublksrv
+          git -C /tmp/ublksrv checkout 6d0d922614ec18e6f2b5d476af8d540a1d9c1de8
+          cd /tmp/ublksrv
+          autoreconf -fi
+          ./configure --without-libnfs --without-libiscsi --without-gnutls
+          make -C lib -j2
+          make -j2 ublk
+          cd "$GITHUB_WORKSPACE"
+          cmake -S v060 -B build-v060-kernel -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+          cmake --build build-v060-kernel --parallel
+          g++ -std=c++20 -Wall -Wextra \
+            -I/tmp/ublksrv/include -I/tmp/ublksrv/targets/include \
+            -Iv060/include -Iv050/include -Iv012/include -I/tmp/ublksrv \
+            /tmp/ublksrv/targets/ublksrv_tgt.cpp \
+            v060/experimental/ublk/nopen_ublk_recovery_target.cpp \
+            build-v060-kernel/libnopen_isolated_io.a \
+            build-v060-kernel/libnopen_recovery.a \
+            build-v060-kernel/v050/libnopen_blk_backend.a \
+            build-v060-kernel/v050/v040/v030/v012/libnopen_vram_store.a \
+            build-v060-kernel/v050/v040/v030/v012/libnopen_page_core.a \
+            /tmp/ublksrv/lib/.libs/libublksrv.a \
+            -luring -lOpenCL -lpthread -ldl -o /tmp/nopen-v060-ublk-recovery
+      - name: Real kernel ublk create, direct 4KiB write/read, teardown
+        if: steps.kernel.outputs.available == 'true'
+        timeout-minutes: 3
+        run: |
+          sudo env GITHUB_ACTIONS=true NOPEN_ISOLATED_VM_TEST=I_ACKNOWLEDGE_DISPOSABLE_VM \
+            bash v060/experimental/ublk/test_vm_kernel_lifecycle.sh \
+            /tmp/nopen-v060-ublk-recovery /tmp/ublksrv/ublk \
+            "$GITHUB_WORKSPACE/build-v060-kernel/nopen-isolated-worker"
