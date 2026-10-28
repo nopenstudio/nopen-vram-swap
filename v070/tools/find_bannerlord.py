@@ -11,6 +11,9 @@ import re
 import sys
 
 GAME_EXE = re.compile(r"(?i)^bannerlord(?:[._-]native)?(?:\.exe)?$")
+# Linux task comm is limited to TASK_COMM_LEN - 1 = 15 bytes. Wine often
+# exposes Bannerlord.Native.exe in /proc/PID/comm as "Bannerlord.Nativ".
+TRUNCATED_GAME_COMM = re.compile(r"(?i)^bannerlord\.nativ$")
 NOT_GAME = re.compile(r"(?i)(launcher|steam|proton|wineserver|reaper|pressure-vessel)")
 
 def executable_basename(raw: str) -> str:
@@ -31,7 +34,8 @@ def entries(root: Path = Path("/proc")) -> list[tuple[int, int, str]]:
             cmd_raw = (folder / "cmdline").read_bytes()
             argv0 = cmd_raw.split(b"\0")[0].decode("utf-8", errors="replace") if cmd_raw else ""
             name = executable_basename(argv0)
-            if not any(GAME_EXE.fullmatch(x) for x in (name, comm)):
+            if not (GAME_EXE.fullmatch(name) or GAME_EXE.fullmatch(comm)
+                    or TRUNCATED_GAME_COMM.fullmatch(comm)):
                 continue
             if NOT_GAME.search(name) or NOT_GAME.search(comm):
                 continue
