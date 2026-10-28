@@ -37,8 +37,21 @@ fi
 command -v swapon >/dev/null
 command -v swapoff >/dev/null
 if [[ "$action" == stop ]]; then
-  [[ -r "$state/device" && "$(cat "$state/device")" == "$dev" ]] ||
-      { echo "V070_STOP_REFUSED state file absent/mismatch; do not remove unknown block devices" >&2; exit 2; }
+  # Idempotent stop when no Nopen swap was ever started. NEVER claim cleanup
+  # if the kernel device or its root service exists without matching state.
+  if [[ ! -r "$state/device" ]]; then
+    if [[ ! -e "$dev" ]] && ! is_active &&
+       ! systemctl is-active --quiet "$service"; then
+      echo "V070_STOP_ALREADY_INACTIVE nothing_to_stop=YES zram_untouched=YES"
+      exit 0
+    fi
+    echo "V070_STOP_REFUSED state missing while device/service exists; manual investigation required" >&2
+    exit 2
+  fi
+  if [[ "$(cat "$state/device")" != "$dev" ]]; then
+    echo "V070_STOP_REFUSED state/device mismatch; do not remove unknown block devices" >&2
+    exit 2
+  fi
   if is_active; then
     echo "V070_STOP swapoff requested (can stall under memory pressure)"
     if ! timeout --signal=TERM --kill-after=5s 40s swapoff "$dev"; then
