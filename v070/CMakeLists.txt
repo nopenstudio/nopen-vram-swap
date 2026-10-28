@@ -33,6 +33,11 @@ add_test(NAME v070_swap_controller_command_gate
 set_tests_properties(v070_swap_controller_command_gate PROPERTIES
  PASS_REGULAR_EXPRESSION "V070_GATE_PASS" TIMEOUT 15)
 
+add_test(NAME v070_real_bannerlord_proton_pid_detection
+ COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/tests/test_game_pid.py")
+set_tests_properties(v070_real_bannerlord_proton_pid_detection PROPERTIES
+ PASS_REGULAR_EXPRESSION "BANNERLORD_PID_TEST_PASS" TIMEOUT 10)
+
 add_test(NAME v070_bannerlord_swap_proof_and_comparison
  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/tests/test_game_comparison.py")
 set_tests_properties(v070_bannerlord_swap_proof_and_comparison PROPERTIES
