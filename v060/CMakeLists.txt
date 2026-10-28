@@ -21,6 +21,16 @@ target_compile_options(nopen-watchdog-fixture PRIVATE -Wall -Wextra -Wpedantic -
 add_executable(nopen-test-rebuild tests/test_rebuild.c)
 target_link_libraries(nopen-test-rebuild PRIVATE nopen_recovery Threads::Threads)
 target_compile_options(nopen-test-rebuild PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_library(nopen_isolated_io STATIC src/nopen_isolated_io.c)
+target_include_directories(nopen_isolated_io PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
+target_link_libraries(nopen_isolated_io PUBLIC nopen_page_core Threads::Threads)
+target_compile_options(nopen_isolated_io PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_executable(nopen-isolated-worker src/nopen_isolated_worker.c)
+target_link_libraries(nopen-isolated-worker PRIVATE nopen_blk_backend nopen_page_core)
+target_compile_options(nopen-isolated-worker PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_executable(nopen-test-isolated-io tests/test_isolated_io.c)
+target_link_libraries(nopen-test-isolated-io PRIVATE nopen_isolated_io)
+target_compile_options(nopen-test-isolated-io PRIVATE -Wall -Wextra -Wpedantic -Werror)
 enable_testing()
 add_test(NAME v060_gpu_loss_fail_closed_and_cpu_mirror COMMAND nopen-test-recovery)
 set_tests_properties(v060_gpu_loss_fail_closed_and_cpu_mirror PROPERTIES
@@ -52,3 +62,8 @@ add_test(NAME v060_mock_gpu_rehydration_full_verify COMMAND nopen-recovery-lab
  --rebuild-after-loss)
 set_tests_properties(v060_mock_gpu_rehydration_full_verify PROPERTIES
  PASS_REGULAR_EXPRESSION "RECOVERY_LAB_PASS" TIMEOUT 15)
+
+add_test(NAME v060_isolated_gpu_process_deadline_and_ipc_checksum
+    COMMAND nopen-test-isolated-io $<TARGET_FILE:nopen-isolated-worker>)
+set_tests_properties(v060_isolated_gpu_process_deadline_and_ipc_checksum
+    PROPERTIES PASS_REGULAR_EXPRESSION "ISOLATED_TEST_PASS" TIMEOUT 15)
