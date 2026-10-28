@@ -16,3 +16,9 @@ add_test(NAME v070_bannerlord_swap_proof_and_comparison
  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/tests/test_game_comparison.py")
 set_tests_properties(v070_bannerlord_swap_proof_and_comparison PROPERTIES
  PASS_REGULAR_EXPRESSION "GAME_COMPARE_TEST_PASS" TIMEOUT 10)
+
+add_test(NAME v070_fatal_gpu_ipc_forensic_log
+ COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/tests/test_fatal_telemetry.py"
+ $<TARGET_FILE:nopen-test-isolated-io> $<TARGET_FILE:nopen-isolated-worker>)
+set_tests_properties(v070_fatal_gpu_ipc_forensic_log PROPERTIES
+ PASS_REGULAR_EXPRESSION "V070_FATAL_TELEMETRY_PASS" TIMEOUT 20)
