@@ -2,12 +2,13 @@
 # Create disposable Btrfs loop filesystem, verify real NOCOW O_DIRECT shadow,
 # simulate GPU-worker timeout and verify checked fallback. NEVER touch host disk.
 set -euo pipefail
-[[ $# -eq 2 ]] || { echo "usage: $0 test-shadow-bin worker-bin" >&2; exit 2; }
+[[ $# -eq 5 ]] || { echo "usage: $0 test-shadow-bin worker-bin swap-vm-script ublk-target ublk-controller" >&2; exit 2; }
 testbin="$(realpath "$1")"; worker="$(realpath "$2")"
+swaptest="$(realpath "$3")"; target="$(realpath "$4")"; controller="$(realpath "$5")"
 [[ "$EUID" == 0 && "${GITHUB_ACTIONS:-}" == true &&
     "${NOPEN_ISOLATED_VM_TEST:-}" == I_ACKNOWLEDGE_DISPOSABLE_VM ]] ||
   { echo "V070_BTRFS_VM_REFUSED requires disposable GitHub VM" >&2; exit 2; }
-[[ -x "$testbin" && -x "$worker" ]] || exit 2
+[[ -x "$testbin" && -x "$worker" && -x "$target" && -x "$controller" && -f "$swaptest" ]] || exit 2
 vendor="$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null || true)"
 product="$(cat /sys/class/dmi/id/product_name 2>/dev/null || true)"
 printf '%s\n' "$vendor $product" | grep -Eiq \
@@ -43,6 +44,21 @@ grep -q V070_BTRFS_NOCOW_FLAG_PASS "$dir/test.log" || {
 grep -q V070_SHADOW_TEST_PASS "$dir/test.log" || {
   cat "$dir/test.log" >&2; exit 5;
 }
+# Swap pages REALLY go through a Linux kernel block device while its
+# authoritative SSD shadow lives on Btrfs NOCOW, not ext4. GPU remains mock.
+NOPEN_V070_SHADOW_TEST_DIR="$mnt/outer/shadow-subvolume" \
+  bash "$swaptest" "$target" "$controller" "$worker" \
+  >"$dir/kernel.log" 2>&1 || {
+  cat "$dir/kernel.log" >&2
+  echo "V070_BTRFS_KERNEL_SWAP_FAILED real swap-in/out recovery failed" >&2
+  exit 7
+}
+grep -q V070_PAGING_FAILOVER_PASS_AFTER_READ "$dir/kernel.log" || {
+  cat "$dir/kernel.log" >&2
+  exit 7
+}
+echo "V070_BTRFS_KERNEL_SWAP_PASS swapped_pages_recovered=YES"
+echo "V070_BTRFS_KERNEL_SWAP_NOTE disk_shadow_btrfs_nocow=YES gpu_backend=mock"
 # A parent's regular subvolume snapshot must NOT contain nested child's data.
 # This mitigates auto-snapshotting of the host root subvolume, not direct
 # snapshots or reflinks deliberately made of the Nopen child subvolume.
