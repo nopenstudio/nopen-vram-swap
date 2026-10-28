@@ -13,11 +13,17 @@
 #define ASSERT(q) do{if(!(q)){fprintf(stderr,"V070_SHADOW_TEST_FAILED line=%d check=%s\n",__LINE__,#q);return 1;}}while(0)
 
 int main(int argc,char **argv) {
-    ASSERT(argc==2 && argv[1][0]=='/');
-    char directory[]="/tmp/nopen-shadow-ci-XXXXXX";
+    /* Garuda often mounts /tmp as tmpfs. A swap shadow must NEVER be on
+     * tmpfs, even for the mock test: test it under the CMake build directory
+     * on real disk, as the already-passing nopen-shadow-smoke does. */
+    ASSERT(argc==3 && argv[1][0]=='/' && argv[2][0]=='/');
+    char directory[4096]={0};
+    int n=snprintf(directory,sizeof directory,"%s/nopen-shadow-ci-XXXXXX",argv[2]);
+    ASSERT(n>0 && (size_t)n<sizeof directory);
     ASSERT(mkdtemp(directory)!=NULL);
-    char path[512]={0};
-    ASSERT(snprintf(path,sizeof(path),"%s/virgin-shadow.bin",directory)>0);
+    char path[4096]={0};
+    n=snprintf(path,sizeof path,"%s/virgin-shadow.bin",directory);
+    ASSERT(n>0 && (size_t)n<sizeof path);
     nopen_shadow *s=NULL;
     nopen_shadow_stats stats={0};
     unsigned char expected[PAGECOUNT*P]={0},read_buf[16u*P],src[16u*P];
