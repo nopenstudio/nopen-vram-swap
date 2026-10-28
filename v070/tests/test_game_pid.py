@@ -22,6 +22,11 @@ with TemporaryDirectory() as td:
     assert executable_basename("C:\\Game\\Bannerlord.exe")=="Bannerlord.exe"
     assert find_game_pid(root)==104
     assert len(entries(root))==1
+    # Wine often reports just 15 chars of the true Bannerlord.Native.exe.
+    fake(root, 107, "Bannerlord.Nativ", "/usr/bin/wine64-preloader", 256000)
+    assert find_game_pid(root)==107
+    assert len(entries(root))==2
+    (root/"107"/"comm").write_text("Launcher.Native\n")
     (root/"104"/"comm").write_text("TaleWorlds.Launch\n")
     (root/"104"/"cmdline").write_bytes(b"C:\\Game\\TaleWorlds.MountAndBlade.Launcher.exe\0")
     try:
@@ -30,4 +35,4 @@ with TemporaryDirectory() as td:
         assert "no real Bannerlord" in str(exc)
     else:
         raise AssertionError("accepted launcher process as active game")
-print("BANNERLORD_PID_TEST_PASS real_proton_game_selected=YES launcher_excluded=YES zombie_excluded=YES")
+print("BANNERLORD_PID_TEST_PASS real_proton_game_selected=YES truncated_comm_supported=YES launcher_excluded=YES zombie_excluded=YES")
