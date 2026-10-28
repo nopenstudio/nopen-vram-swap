@@ -18,6 +18,9 @@ target_compile_options(nopen-recovery-lab PRIVATE -Wall -Wextra -Wpedantic -Werr
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_executable(nopen-watchdog-fixture tests/watchdog_fixture.c)
 target_compile_options(nopen-watchdog-fixture PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_executable(nopen-test-rebuild tests/test_rebuild.c)
+target_link_libraries(nopen-test-rebuild PRIVATE nopen_recovery Threads::Threads)
+target_compile_options(nopen-test-rebuild PRIVATE -Wall -Wextra -Wpedantic -Werror)
 enable_testing()
 add_test(NAME v060_gpu_loss_fail_closed_and_cpu_mirror COMMAND nopen-test-recovery)
 set_tests_properties(v060_gpu_loss_fail_closed_and_cpu_mirror PROPERTIES
@@ -39,3 +42,7 @@ add_test(NAME v060_readonly_game_baseline_samples_and_preserves_csv
     "${CMAKE_CURRENT_LIST_DIR}/tools/game_baseline.py")
 set_tests_properties(v060_readonly_game_baseline_samples_and_preserves_csv PROPERTIES
     PASS_REGULAR_EXPRESSION "BASELINE_TEST_PASS" TIMEOUT 10)
+
+add_test(NAME v060_two_phase_gpu_rebuild_and_concurrent_io COMMAND nopen-test-rebuild)
+set_tests_properties(v060_two_phase_gpu_rebuild_and_concurrent_io PROPERTIES
+  PASS_REGULAR_EXPRESSION "REBUILD_TEST_PASS" TIMEOUT 30)
