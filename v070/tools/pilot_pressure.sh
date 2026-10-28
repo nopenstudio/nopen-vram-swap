@@ -66,7 +66,11 @@ try:
     for pos in range(0,length,4096):
         if data[pos]!=((pos//4096)*31+17)&255:
             raise RuntimeError(f"memory corruption page={pos//4096}")
-    done.write_text("PILOT_DATA_VERIFIED")
+    # Keep success signal transactional: never let shell observe an empty
+    # result marker before verified content has been fully written.
+    temporary=done.with_name(done.name+".tmp")
+    temporary.write_text("PILOT_DATA_VERIFIED")
+    temporary.replace(done)
 except Exception as err:
     print("V070_PILOT_CHILD_FAILED",repr(err),file=sys.stderr)
     sys.exit(1)
@@ -104,6 +108,7 @@ done
   cat "$dir/probe.log" >&2
   exit 4
 }
+grep -Fxq "PILOT_DATA_VERIFIED" "$dir/done" || { echo "V070_PILOT_FAILED invalid verification marker" >&2; exit 4; }
 wait "$child";child=0
 echo "V070_PILOT_PRESSURE_PASS real_amdgpu=YES kernel_swap_used_kib=$used"
 echo "V070_PILOT_PRESSURE_PASS_AFTER_READ verified_memory_pages=28672 gpu_ssd_shadow=YES data_corruption=NO"
