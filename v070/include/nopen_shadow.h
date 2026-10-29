@@ -9,7 +9,7 @@ extern "C" {
 typedef struct nopen_shadow nopen_shadow;
 typedef struct {
     uint64_t writes, reads, gpu_reads, gpu_writes;
-    uint64_t shadow_reads, gpu_failures, integrity_mismatches;
+    uint64_t shadow_reads, zero_reads, gpu_failures, integrity_mismatches;
     uint64_t disk_failures, backed_bytes;
     int gpu_active, poisoned;
 } nopen_shadow_stats;

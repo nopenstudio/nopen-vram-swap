@@ -29,6 +29,7 @@ struct nopen_shadow {
     pthread_mutex_t lock;
     unsigned char *aligned;
     uint64_t *checksums;
+    unsigned char *written_bits; /* one bit/page, ~128KiB at 4GiB */
     size_t pages;
     nopen_shadow_stats stats;
     int gpu_active;
@@ -85,9 +86,10 @@ int nopen_shadow_open(nopen_shadow **out,nopen_backend backend,
     s->fd=-1;
     s->pages=mib*(MIB/PAGE);
     s->checksums=calloc(s->pages,sizeof(*s->checksums));
+    s->written_bits=calloc((s->pages+7u)/8u,1);
     if(posix_memalign((void **)&s->aligned,PAGE,BLOCK)!=0)
         s->aligned=NULL;
-    if(!s->checksums||!s->aligned)goto oom;
+    if(!s->checksums||!s->written_bits||!s->aligned)goto oom;
     if(pthread_mutex_init(&s->lock,NULL)!=0)goto oom;
     s->fd=open(path,O_CREAT|O_EXCL|O_RDWR|O_DIRECT|O_DSYNC|O_CLOEXEC,0600);
     if(s->fd<0)goto open_error;
@@ -136,16 +138,36 @@ int nopen_shadow_open(nopen_shadow **out,nopen_backend backend,
     }
     memset(s->aligned,0,BLOCK);
     const uint64_t zero_checksum=nopen_page_checksum(s->aligned,PAGE);
-    /* Convert all preallocated, unwritten extents to initialized extents
-     * BEFORE activating swap. No lazy allocation on page fault. */
-    for(size_t first=0;first<s->pages;first+=BLOCK/PAGE) {
+    /* v0.8 alpha.1: one-time 1MiB aligned staging buffer reduces 4GiB
+     * disk-shadow initialization from 65536 to 4096 O_DIRECT write calls.
+     * Every extent is still initialized BEFORE kernel swap activation:
+     * never trade reclaim safety for sparse or lazy allocation. The normal
+     * I/O staging buffer remains capped at 64KiB after initialization.
+     * If 1MiB allocation is unavailable, retain the proven 64KiB path. */
+    unsigned char *init_buffer=NULL;
+    const size_t fast_chunk=1024u*1024u;
+    if(posix_memalign((void **)&init_buffer,PAGE,fast_chunk)==0)
+        memset(init_buffer,0,fast_chunk);
+    else init_buffer=NULL;
+    const size_t init_chunk=init_buffer?fast_chunk:BLOCK;
+    const unsigned char *init_source=init_buffer?init_buffer:s->aligned;
+    size_t init_calls=0;
+    for(size_t first=0;first<s->pages;first+=init_chunk/PAGE) {
         size_t count=s->pages-first;
-        if(count>BLOCK/PAGE)count=BLOCK/PAGE;
-        if(full_pwrite(s->fd,s->aligned,count*PAGE,
-                       (off_t)(first*PAGE))!=0)
+        if(count>init_chunk/PAGE)count=init_chunk/PAGE;
+        if(full_pwrite(s->fd,init_source,count*PAGE,
+                       (off_t)(first*PAGE))!=0) {
+            free(init_buffer);
             goto open_error;
+        }
+        init_calls++;
     }
+    free(init_buffer);
     if(fdatasync(s->fd)!=0)goto open_error;
+    fprintf(stderr,"NOPEN_V080_SHADOW_INIT_BATCH chunk_kib=%zu"
+                   " write_calls=%zu pages=%zu"
+                   " full_preinitialized=YES lazy_allocation=NO\n",
+            init_chunk/1024u,init_calls,s->pages);
     for(size_t i=0;i<s->pages;i++)s->checksums[i]=zero_checksum;
     const int worker_rc=nopen_isolated_open(&s->gpu,backend,mib,timeout_ms,worker);
     if(worker_rc!=0) {
@@ -164,10 +186,10 @@ open_error:
      nopen_isolated_close(s->gpu);
      if(s->fd>=0){close(s->fd);unlink(path);}
      pthread_mutex_destroy(&s->lock);
-     free(s->aligned);free(s->checksums);free(s);
+     free(s->aligned);free(s->written_bits);free(s->checksums);free(s);
      return -rc;}
 oom:
-    free(s->aligned);free(s->checksums);free(s);
+    free(s->aligned);free(s->written_bits);free(s->checksums);free(s);
     return -ENOMEM;
 }
 int nopen_shadow_write(nopen_shadow *s,uint64_t off,const void *src,size_t len) {
@@ -183,8 +205,13 @@ int nopen_shadow_write(nopen_shadow *s,uint64_t off,const void *src,size_t len) 
         return -EIO;
     }
     size_t first=(size_t)(off/PAGE);
-    for(size_t i=0;i<len/PAGE;i++)
+    for(size_t i=0;i<len/PAGE;i++) {
         s->checksums[first+i]=nopen_page_checksum(s->aligned+i*PAGE,PAGE);
+        /* Only set AFTER successful O_DSYNC authoritative write. */
+        const size_t logical=first+i;
+        s->written_bits[logical>>3] |=
+            (unsigned char)(1u<<(logical&7u));
+    }
     s->stats.writes++;
     if(s->gpu_active) {
         if(nopen_isolated_write(s->gpu,off,src,len)!=0) {
@@ -203,6 +230,26 @@ int nopen_shadow_read(nopen_shadow *s,uint64_t off,void *dst,size_t len) {
     if(s->poisoned){pthread_mutex_unlock(&s->lock);return -EIO;}
     int gpu_ok=0;
     const size_t first=(size_t)(off/PAGE);
+    /* v0.8 alpha.1: a range with no acknowledged writes is logically all
+     * zero. Return the known value without GPU IPC, SSD page-in, or reclaim
+     * dependency. Do NOT infer this from checksums (hash collisions); a
+     * dedicated residency bit is set only after the disk write succeeds. */
+    int never_written=1;
+    for(size_t i=0;i<len/PAGE;i++) {
+        const size_t logical=first+i;
+        if(s->written_bits[logical>>3] &
+           (unsigned char)(1u<<(logical&7u))) {
+            never_written=0;
+            break;
+        }
+    }
+    if(never_written) {
+        memset(dst,0,len);
+        s->stats.reads++;
+        s->stats.zero_reads++;
+        pthread_mutex_unlock(&s->lock);
+        return 0;
+    }
     if(s->gpu_active) {
         const int gpu_rc=nopen_isolated_read(s->gpu,off,s->aligned,len);
         const int mismatch=gpu_rc==0 &&
@@ -280,5 +327,5 @@ void nopen_shadow_close(nopen_shadow *s) {
     if(s->fd>=0)close(s->fd);
     pthread_mutex_unlock(&s->lock);
     pthread_mutex_destroy(&s->lock);
-    free(s->aligned);free(s->checksums);free(s);
+    free(s->aligned);free(s->written_bits);free(s->checksums);free(s);
 }
