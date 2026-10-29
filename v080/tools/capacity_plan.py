@@ -30,6 +30,8 @@ def _read_uint(path: Path) -> int:
 def amd_discrete_vram(sysfs: Path = Path("/sys/bus/pci/devices")) -> tuple[int, int]:
     candidates = []
     for d in sysfs.iterdir():
+        if not d.is_dir():
+            continue
         try:
             v = (d / "vendor").read_text().strip().lower()
             cls = (d / "class").read_text().strip().lower()
