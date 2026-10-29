@@ -13,11 +13,13 @@ def parse(path: Path, expected_mode: str) -> dict[int, dict]:
     for line in path.read_text(encoding="utf-8",errors="replace").splitlines():
         if line.startswith("V080_GPU_FULL_ARENA_VERIFIED"):
             pairs = dict(x.split("=",1) for x in line.split()[1:] if "=" in x)
-            full_arena |= pairs.get("mode")==expected_mode and \
-                          pairs.get("backend")=="opencl" and \
-                          pairs.get("capacity_mib")=="1024" and
-                          pairs.get("all_writes_before_reads")=="YES" and
-                          pairs.get("simultaneous_logical_capacity")=="YES"
+            full_arena |= (
+                pairs.get("mode")==expected_mode and
+                pairs.get("backend")=="opencl" and
+                pairs.get("capacity_mib")=="1024" and
+                pairs.get("all_writes_before_reads")=="YES" and
+                pairs.get("simultaneous_logical_capacity")=="YES"
+            )
         if line.startswith("V080_GPU_BENCH_RESULT"):
             pairs = dict(x.split("=",1) for x in line.split()[1:] if "=" in x)
             if pairs.get("backend")!="opencl" or pairs.get("mode")!=expected_mode:
