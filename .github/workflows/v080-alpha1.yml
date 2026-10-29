@@ -1,0 +1,75 @@
+name: v0.8 alpha.1 offline staged capacity and optimization
+on:
+  push:
+    branches: ["develop/v0.8.0-alpha.1"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inherited-regression:
+    name: Existing regressions + strict 1/2/4GiB policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure and build complete mock stack (no OpenCL)
+        run: |
+          cmake -S v080 -B build-v080 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-v080 --parallel
+          ctest --test-dir build-v080 --output-on-failure
+      - name: Prove no root or kernel swap was invoked by build
+        run: |
+          python3 v080/tests/test_capacity_plan.py
+          python3 v080/tests/test_opencl_optimization.py
+          bash -n v070/tools/vram_swap_lab.sh
+  stage-1gib:
+    name: Stage 1 - 1024MiB mock+durable SSD proof
+    needs: inherited-regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build 1GiB offline tester
+        run: |
+          cmake -S v080 -B build-v080 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-v080 --parallel
+      - name: Test 1GiB fully preinitialized SSD shadow + integrity + worker loss
+        run: |
+          df -h "$RUNNER_TEMP"
+          ./build-v080/nopen-v080-scale \
+            "$GITHUB_WORKSPACE/build-v080/v070/v060/nopen-isolated-worker" \
+            "$RUNNER_TEMP/nopen-v080-stage-1gib-unique.bin" 1024
+  stage-2gib:
+    name: Stage 2 - 2048MiB mock+durable SSD proof
+    needs: stage-1gib
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build 2GiB offline tester
+        run: |
+          cmake -S v080 -B build-v080 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-v080 --parallel
+      - name: Test 2GiB fully preinitialized SSD shadow + integrity + worker loss
+        run: |
+          df -h "$RUNNER_TEMP"
+          ./build-v080/nopen-v080-scale \
+            "$GITHUB_WORKSPACE/build-v080/v070/v060/nopen-isolated-worker" \
+            "$RUNNER_TEMP/nopen-v080-stage-2gib-unique.bin" 2048
+  stage-4gib:
+    name: Stage 3 - 4096MiB mock+durable SSD proof
+    needs: stage-2gib
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build 4GiB offline tester
+        run: |
+          cmake -S v080 -B build-v080 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-v080 --parallel
+      - name: Test 4GiB fully preinitialized SSD shadow + integrity + worker loss
+        run: |
+          df -h "$RUNNER_TEMP"
+          ./build-v080/nopen-v080-scale \
+            "$GITHUB_WORKSPACE/build-v080/v070/v060/nopen-isolated-worker" \
+            "$RUNNER_TEMP/nopen-v080-stage-4gib-unique.bin" 4096
