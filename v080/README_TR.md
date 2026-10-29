@@ -92,3 +92,25 @@ CI'da mock aşamalar zorunlu sırayla ilerler.
   uzun test ve güvenli swapoff kanıtları gelmeden KESİNLİKLE açılmayacak.
 
 Bu sürümün adı: **ölçekleme altyapısı + ölçümlü optimizasyon hazırlığı**.
+
+## Doğrulanmış GitHub CI sonucu (2026-10-29)
+
+Kaynak: https://github.com/nopenstudio/nopen-vram-swap/actions/runs/40920014639
+
+| Test | Sonuç | Ayrıntı |
+|---|---|---|
+| Tüm regresyonlar | **42/42 PASS** | v0.7 mirası + v0.8 kapasite/zero-page testi |
+| 1 GiB | **PASS** | 1.024 adet 1 MiB prezero yazması; 3 segment sınırı |
+| 2 GiB | **PASS** | 2.048 adet 1 MiB prezero yazması; 7 segment sınırı |
+| 4 GiB | **PASS** | 4.096 adet 1 MiB prezero yazması; 15 segment sınırı |
+| İşçi kaybı sonrası SSD kurtarma | **Üçünde PASS** | 256 tam sayfa + segment sınırı 64 KiB örnekleri |
+| Gerçek fiziksel AMDGPU 1/2/4 GiB | **YAPILMADI** | CI yalnızca mock işçili test |
+| Kernel SWAP 1/2/4 GiB | **YASAK / YAPILMADI** | Eski fiziksel 64 MiB pilot sınırı değişmedi |
+
+GitHub'ın geçici SSD ortamındaki üç aşamanın toplam süresi ve gecikmeleri
+gerçek GPU+Bannerlord performansının yerine geçmez. 4 GiB testinde yazma
+p50=129.2 mikrosaniye, p95=157.5 mikrosaniye; mock GPU okuması p50=34.7
+mikrosaniye, p95=36.9 mikrosaniye; SSD fallback p50=131.3, p95=155.2
+mikrosaniye olarak ölçüldü. Bunlar **CI makinesine özgü gözlemlerdir**,
+v0.7'ye göre kanıtlanmış hızlanma iddiası değildir.
+
