@@ -49,3 +49,14 @@ add_test(NAME v080_alpha2_strict_gpu_benchmark_report
          "${CMAKE_CURRENT_LIST_DIR}/tests/test_gpu_compare.py")
 set_tests_properties(v080_alpha2_strict_gpu_benchmark_report PROPERTIES
  PASS_REGULAR_EXPRESSION "V080_ALPHA2_GPU_COMPARE_TEST_PASS" TIMEOUT 10)
+
+add_executable(nopen-v080-shadow-bench src/nopen_shadow_bench.c)
+target_link_libraries(nopen-v080-shadow-bench PRIVATE nopen_shadow)
+target_compile_options(nopen-v080-shadow-bench PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_test(NAME v080_alpha2_real_ssd_shadow_write_through_and_worker_failover_mock
+ COMMAND nopen-v080-shadow-bench --backend mock --mode direct
+         --operations 32
+         --worker $<TARGET_FILE:nopen-isolated-worker>
+         --shadow-file "${CMAKE_CURRENT_BINARY_DIR}/v080-alpha2-shadow-mock.bin")
+set_tests_properties(v080_alpha2_real_ssd_shadow_write_through_and_worker_failover_mock PROPERTIES
+ PASS_REGULAR_EXPRESSION "V080_SHADOW_BENCH_PASS" TIMEOUT 40)
