@@ -18,6 +18,9 @@ jobs:
           cmake --build build-v080 --parallel
           ctest --test-dir build-v080 --output-on-failure
           bash -n v070/tools/vram_swap_lab.sh
+          bash -n v080/tools/run_alpha2_gpu.sh
+          python3 -m py_compile v080/tools/compare_gpu_paths.py
+          python3 -m py_compile v080/tests/test_gpu_compare.py
           python3 v080/tests/test_capacity_plan.py
           python3 v080/tests/test_opencl_optimization.py
       - name: Prove production physical SWAP gate remains unchanged
