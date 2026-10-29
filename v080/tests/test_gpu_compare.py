@@ -12,6 +12,7 @@ spec.loader.exec_module(cmp)
 def mock(mode,ops=128,complete=True,backend="opencl"):
     lines=[f"V080_GPU_FULL_ARENA_VERIFIED backend={backend} mode={mode} "
            "capacity_mib=1024 full_bytes_checked=1073741824 "
+           "all_writes_before_reads=YES simultaneous_logical_capacity=YES "
            "host_staging_mib=8 kernel_swap=NO"]
     for i,size in enumerate((4,64,1024,4096)):
         lines.append(f"V080_GPU_BENCH_RESULT backend={backend} mode={mode}"
