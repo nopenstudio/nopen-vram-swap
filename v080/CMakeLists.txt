@@ -19,3 +19,12 @@ add_test(NAME v080_opencl_profiling_is_opt_in
          "${CMAKE_CURRENT_LIST_DIR}/tests/test_opencl_optimization.py")
 set_tests_properties(v080_opencl_profiling_is_opt_in PROPERTIES
  PASS_REGULAR_EXPRESSION "V080_PROFILING_POLICY_PASS" TIMEOUT 15)
+
+add_executable(nopen-v080-test-zero tests/test_zero_fastpath.c)
+target_link_libraries(nopen-v080-test-zero PRIVATE nopen_shadow)
+target_compile_options(nopen-v080-test-zero PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_test(NAME v080_zero_page_fastpath_preserves_acked_writes
+ COMMAND nopen-v080-test-zero $<TARGET_FILE:nopen-isolated-worker>
+         "${CMAKE_CURRENT_BINARY_DIR}")
+set_tests_properties(v080_zero_page_fastpath_preserves_acked_writes PROPERTIES
+ PASS_REGULAR_EXPRESSION "V080_ZERO_FASTPATH_PASS" TIMEOUT 30)
