@@ -70,6 +70,26 @@ python3 v080/tools/compare_gpu_paths.py \
   --direct "$out/direct.log" --pinned "$out/pinned.log" \
   --json "$out/comparison.json" | tee "$out/summary.txt"
 
+# Actual Nopen datapath: no Linux swapon, but GPU IPC and O_DSYNC
+# independent SSD authority are both ACTIVE. This is what a safe write
+# costs and why a raw PCIe bandwidth number is not swap throughput.
+echo "V080_ALPHA2_SHADOW_DIRECT_START 64MiB write_through=YES"
+timeout --signal=TERM --kill-after=5s 240s \
+  "$build/nopen-v080-shadow-bench" --backend opencl --mode direct \
+  --worker "$build/v070/v060/nopen-isolated-worker" \
+  --shadow-file "$out/shadow-direct.bin" \
+  --operations 128 --ack I_ACCEPT_REAL_GPU_SHADOW_NO_SWAP \
+  2>&1 | tee "$out/shadow-direct.log"
+
+echo "V080_ALPHA2_SHADOW_PINNED_START 64MiB write_through=YES"
+timeout --signal=TERM --kill-after=5s 240s \
+  "$build/nopen-v080-shadow-bench" --backend opencl --mode pinned \
+  --worker "$build/v070/v060/nopen-isolated-worker" \
+  --shadow-file "$out/shadow-pinned.bin" \
+  --operations 128 --ack I_ACCEPT_REAL_GPU_SHADOW_NO_SWAP \
+  2>&1 | tee "$out/shadow-pinned.log"
+
 echo "V080_ALPHA2_LOCAL_PASS report_dir=$out"
-echo "Submit direct.log, pinned.log, comparison.json, and metadata.txt."
+echo "Submit direct.log, pinned.log, comparison.json, metadata.txt,"
+echo "shadow-direct.log and shadow-pinned.log."
 echo "No kernel swap activated; no Bannerlord benchmark run by this script."
