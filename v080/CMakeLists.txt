@@ -43,3 +43,9 @@ add_test(NAME v080_alpha2_mock_pinned_cli_integrity
          --pool-mib 16 --operations 32)
 set_tests_properties(v080_alpha2_mock_pinned_cli_integrity PROPERTIES
  PASS_REGULAR_EXPRESSION "V080_GPU_BENCH_PASS" TIMEOUT 45)
+
+add_test(NAME v080_alpha2_strict_gpu_benchmark_report
+ COMMAND "${Python3_EXECUTABLE}"
+         "${CMAKE_CURRENT_LIST_DIR}/tests/test_gpu_compare.py")
+set_tests_properties(v080_alpha2_strict_gpu_benchmark_report PROPERTIES
+ PASS_REGULAR_EXPRESSION "V080_ALPHA2_GPU_COMPARE_TEST_PASS" TIMEOUT 10)
