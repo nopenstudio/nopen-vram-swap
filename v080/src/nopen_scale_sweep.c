@@ -159,6 +159,28 @@ int main(int argc,char **argv) {
         }
         gpu_read_us[i]=microseconds()-before;
     }
+    /* Full 64KiB transfers CROSS actual 256MiB GPU segment boundaries.
+     * A 4GiB logical arena has fifteen such joins; partial GPU transfer
+     * must never cause an acknowledged page to vanish from the SSD shadow. */
+    unsigned char cross_written[16u*PAGE],cross_got[16u*PAGE];
+    size_t cross_boundaries=0;
+    for(size_t boundary=256u*MIB/PAGE;boundary<pages;
+        boundary+=256u*MIB/PAGE) {
+        const size_t first=boundary-8u;
+        for(size_t j=0;j<sizeof cross_written;j++)
+            cross_written[j]=(unsigned char)(
+                (boundary*7u + j*19u + (j>>9))&255u);
+        if(nopen_shadow_write(shadow,(uint64_t)first*PAGE,
+                              cross_written,sizeof cross_written)!=0 ||
+           nopen_shadow_read(shadow,(uint64_t)first*PAGE,
+                              cross_got,sizeof cross_got)!=0 ||
+           memcmp(cross_written,cross_got,sizeof cross_written)!=0) {
+            fprintf(stderr,"V080_SCALE_CROSS_SEGMENT_GPU_FAILED boundary_page=%zu\n",
+                    boundary);
+            goto finish;
+        }
+        cross_boundaries++;
+    }
     if(nopen_shadow_simulate_gpu_loss(shadow)!=0)goto finish;
     for(size_t i=0;i<SAMPLES;i++) {
         const size_t p=(last*i)/(SAMPLES-1);
@@ -172,6 +194,20 @@ int main(int argc,char **argv) {
         }
         disk_read_us[i]=microseconds()-before;
     }
+    for(size_t boundary=256u*MIB/PAGE;boundary<pages;
+        boundary+=256u*MIB/PAGE) {
+        const size_t first=boundary-8u;
+        for(size_t j=0;j<sizeof cross_written;j++)
+            cross_written[j]=(unsigned char)(
+                (boundary*7u+j*19u+(j>>9))&255u);
+        if(nopen_shadow_read(shadow,(uint64_t)first*PAGE,
+                              cross_got,sizeof cross_got)!=0 ||
+           memcmp(cross_written,cross_got,sizeof cross_written)!=0) {
+            fprintf(stderr,"V080_SCALE_CROSS_SEGMENT_SSD_FAILED boundary_page=%zu\n",
+                    boundary);
+            goto finish;
+        }
+    }
     patterned(expected,(uint64_t)last+1);
     if(nopen_shadow_write(shadow,(uint64_t)last*PAGE,expected,PAGE)!=0 ||
        nopen_shadow_read(shadow,(uint64_t)last*PAGE,got,PAGE)!=0 ||
@@ -180,10 +216,14 @@ int main(int argc,char **argv) {
     if(nopen_shadow_get_stats(shadow,&stats)!=0 ||
        stats.gpu_active || stats.poisoned || stats.disk_failures ||
        stats.gpu_failures!=1 || stats.backed_bytes!=(uint64_t)capacity*MIB ||
-       stats.gpu_reads<SAMPLES || stats.shadow_reads<SAMPLES)
+       stats.gpu_reads<SAMPLES+cross_boundaries ||
+       stats.shadow_reads<SAMPLES+cross_boundaries ||
+       stats.zero_reads<SAMPLES)
         goto finish;
     printf("V080_SCALE_RESULT capacity_mib=%lu pages=%zu"
            " sampled_written_pages=%u sampled_full_page_verified=%u"
+           " cross_256mib_segment_boundaries=%zu"
+           " zero_reads_without_backend=%" PRIu64
            " last_page_offset=%" PRIu64 " backend=mock"
            " prezero_full_capacity=YES kernel_swap=NO"
            " shadow_worker_loss_verified=YES"
@@ -192,7 +232,7 @@ int main(int argc,char **argv) {
            " fallback_p50_us=%.1f fallback_p95_us=%.1f"
            " elapsed_s=%.3f\n",
            capacity,pages,SAMPLES,SAMPLES,
-           (uint64_t)last*PAGE,
+           cross_boundaries,stats.zero_reads,(uint64_t)last*PAGE,
            percentile(write_us,50),percentile(write_us,95),
            percentile(gpu_read_us,50),percentile(gpu_read_us,95),
            percentile(disk_read_us,50),percentile(disk_read_us,95),
