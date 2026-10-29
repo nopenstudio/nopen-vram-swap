@@ -136,16 +136,36 @@ int nopen_shadow_open(nopen_shadow **out,nopen_backend backend,
     }
     memset(s->aligned,0,BLOCK);
     const uint64_t zero_checksum=nopen_page_checksum(s->aligned,PAGE);
-    /* Convert all preallocated, unwritten extents to initialized extents
-     * BEFORE activating swap. No lazy allocation on page fault. */
-    for(size_t first=0;first<s->pages;first+=BLOCK/PAGE) {
+    /* v0.8 alpha.1: one-time 1MiB aligned staging buffer reduces 4GiB
+     * disk-shadow initialization from 65536 to 4096 O_DIRECT write calls.
+     * Every extent is still initialized BEFORE kernel swap activation:
+     * never trade reclaim safety for sparse or lazy allocation. The normal
+     * I/O staging buffer remains capped at 64KiB after initialization.
+     * If 1MiB allocation is unavailable, retain the proven 64KiB path. */
+    unsigned char *init_buffer=NULL;
+    const size_t fast_chunk=1024u*1024u;
+    if(posix_memalign((void **)&init_buffer,PAGE,fast_chunk)==0)
+        memset(init_buffer,0,fast_chunk);
+    else init_buffer=NULL;
+    const size_t init_chunk=init_buffer?fast_chunk:BLOCK;
+    const unsigned char *init_source=init_buffer?init_buffer:s->aligned;
+    size_t init_calls=0;
+    for(size_t first=0;first<s->pages;first+=init_chunk/PAGE) {
         size_t count=s->pages-first;
-        if(count>BLOCK/PAGE)count=BLOCK/PAGE;
-        if(full_pwrite(s->fd,s->aligned,count*PAGE,
-                       (off_t)(first*PAGE))!=0)
+        if(count>init_chunk/PAGE)count=init_chunk/PAGE;
+        if(full_pwrite(s->fd,init_source,count*PAGE,
+                       (off_t)(first*PAGE))!=0) {
+            free(init_buffer);
             goto open_error;
+        }
+        init_calls++;
     }
+    free(init_buffer);
     if(fdatasync(s->fd)!=0)goto open_error;
+    fprintf(stderr,"NOPEN_V080_SHADOW_INIT_BATCH chunk_kib=%zu"
+                   " write_calls=%zu pages=%zu"
+                   " full_preinitialized=YES lazy_allocation=NO\n",
+            init_chunk/1024u,init_calls,s->pages);
     for(size_t i=0;i<s->pages;i++)s->checksums[i]=zero_checksum;
     const int worker_rc=nopen_isolated_open(&s->gpu,backend,mib,timeout_ms,worker);
     if(worker_rc!=0) {
