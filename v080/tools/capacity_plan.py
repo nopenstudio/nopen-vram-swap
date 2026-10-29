@@ -55,6 +55,17 @@ def memory_available_mib(path: Path = Path("/proc/meminfo")) -> int:
             return int(words[1]) // 1024
     raise ValueError("MemAvailable not present")
 
+def gpu_kernel_swap_active(path: Path = Path("/proc/swaps")) -> bool:
+    rows = path.read_text(encoding="ascii").splitlines()
+    if not rows or not rows[0].startswith("Filename"):
+        raise ValueError("cannot validate /proc/swaps")
+    for line in rows[1:]:
+        fields = line.split()
+        if fields and (fields[0].startswith("/dev/ublkb")
+                       or fields[0].startswith("/dev/nbd")):
+            return True
+    return False
+
 def free_disk_mib(path: Path) -> int:
     import os
     st = os.statvfs(path)
@@ -101,7 +112,7 @@ def evaluate(capacity_mib: int, total_vram_mib: int, used_vram_mib: int,
         "gates": gates,
         "feasible_now": all(gates.values()),
         "actual_gpu_allocated": False,
-        "kernel_swap_enabled": False,
+        "kernel_swap_activated_by_planner": False,
         "performance_gain_proven": False,
         "long_term_stability_proven": False,
     }
@@ -116,6 +127,8 @@ def main() -> int:
     ap.add_argument("--shadow-directory", type=Path, default=Path.home())
     ns = ap.parse_args()
     try:
+        if gpu_kernel_swap_active():
+            raise ValueError("kernel GPU/NBD swap is active; stop previous experiment first")
         if (ns.vram_total_mib is None) != (ns.vram_used_mib is None):
             raise ValueError("override both VRAM counters together")
         total,used = (amd_discrete_vram() if ns.vram_total_mib is None
