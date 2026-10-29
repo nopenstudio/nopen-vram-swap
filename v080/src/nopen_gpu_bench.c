@@ -167,21 +167,35 @@ static int run(nopen_backend backend,size_t mib,const char *mode,
               " no fallback to host RAM\n",stderr);
         free(source);free(got);return 5;
     }
-    /* Force the whole capacity into the backend. Validate ALL bytes from
-     * every 4MiB chunk, not just a sparse sample or one byte per 4KiB. */
+    /* PROVE simultaneous 1GiB logical residency: first write the ENTIRE
+     * pool, then separately read and verify the ENTIRE pool. Immediate
+     * write-then-read alone would miss aliasing between later chunks.
+     * Never allocate 1GiB host RAM or enable kernel SWAP. */
     for(size_t offset=0;offset<bytes;offset+=BUFFER_BYTES) {
         const size_t len=(bytes-offset<BUFFER_BYTES)
                         ?bytes-offset:BUFFER_BYTES;
         fill_pattern(source,len,(uint64_t)offset,0);
-        const int rc=checked_io(store,offset,source,got,len,NULL,NULL);
-        if(rc!=0) {
+        if(nopen_store_write_pages(store,offset/PAGE,source,len/PAGE)!=0) {
             fprintf(stderr,"V080_GPU_INTEGRITY_FAILED"
-                    " phase=full_arena offset=%zu rc=%d\n",offset,rc);
+                    " phase=full_arena_write offset=%zu\n",offset);
+            nopen_store_close(store);free(source);free(got);return 6;
+        }
+    }
+    for(size_t offset=0;offset<bytes;offset+=BUFFER_BYTES) {
+        const size_t len=(bytes-offset<BUFFER_BYTES)
+                        ?bytes-offset:BUFFER_BYTES;
+        fill_pattern(source,len,(uint64_t)offset,0);
+        if(nopen_store_read_pages(store,offset/PAGE,got,len/PAGE)!=0 ||
+           memcmp(source,got,len)!=0) {
+            fprintf(stderr,"V080_GPU_INTEGRITY_FAILED"
+                    " phase=full_arena_read_after_all_writes offset=%zu\n",
+                    offset);
             nopen_store_close(store);free(source);free(got);return 6;
         }
     }
     printf("V080_GPU_FULL_ARENA_VERIFIED backend=%s mode=%s"
            " capacity_mib=%zu full_bytes_checked=%zu"
+           " all_writes_before_reads=YES simultaneous_logical_capacity=YES"
            " host_staging_mib=8 kernel_swap=NO\n",
            backend==NOPEN_STORE_OPENCL?"opencl":"mock",
            mode,mib,bytes);
