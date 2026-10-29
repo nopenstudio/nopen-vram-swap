@@ -22,6 +22,8 @@ struct nopen_store {
 #ifdef NOPEN_HAS_OPENCL
     cl_context ctx;
     cl_command_queue queue;
+    cl_mem pinned_host; /* Experimental opt-in staging; never kernel swap by default. */
+    size_t pinned_bytes;
     cl_mem segment[MAX_SEGS];
     size_t seg_count;
 #endif
@@ -37,6 +39,7 @@ void nopen_store_close(nopen_store *s) {
     if(!s)return;
 #ifdef NOPEN_HAS_OPENCL
     for(size_t i=0;i<s->seg_count;i++)if(s->segment[i])clReleaseMemObject(s->segment[i]);
+    if(s->pinned_host)clReleaseMemObject(s->pinned_host);
     if(s->queue)clReleaseCommandQueue(s->queue);
     if(s->ctx)clReleaseContext(s->ctx);
 #endif
@@ -101,6 +104,21 @@ static int open_opencl(nopen_store *s,size_t bytes) {
         if(rc!=CL_SUCCESS||!m)return fail(s,"clCreateBuffer failed (insufficient GPU VRAM?)");
         s->segment[s->seg_count++]=m;
     }
+    /* Alpha.2 opt-in pinned-host experiment. NOT enabled for normal swap
+     * traffic, and never silently falls back to RAM-only OpenCL devices.
+     * The 4MiB host buffer bounds locked/pinned host memory use. */
+    const char *mode=getenv("NOPEN_V080_IO_MODE");
+    if(mode && strcmp(mode,"direct")!=0 && strcmp(mode,"pinned")!=0)
+        return fail(s,"unsupported NOPEN_V080_IO_MODE");
+    if(mode && strcmp(mode,"pinned")==0) {
+        s->pinned_bytes=4u*MIB;
+        s->pinned_host=clCreateBuffer(s->ctx,
+            CL_MEM_READ_WRITE|CL_MEM_ALLOC_HOST_PTR,s->pinned_bytes,NULL,&rc);
+        if(rc!=CL_SUCCESS || !s->pinned_host)
+            return fail(s,"CL_MEM_ALLOC_HOST_PTR staging creation failed");
+        fprintf(stderr,"NOPEN_V080_PINNED_ENABLED bytes=%zu"
+                       " experimental=YES kernel_swap=NO\n",s->pinned_bytes);
+    }
     fprintf(stderr,"Nopen v0.12 selected discrete GPU: %s (%s); segments=%zu, GPU reservation=%zu MiB\n",gpu_name,vendor,s->seg_count,bytes/MIB);
     return 0;
 }
@@ -150,9 +168,42 @@ static int io_pages(nopen_store *s,size_t page,void *buf,size_t pages,int write_
         size_t n=SEG_BYTES-seg_off;
         if(n>remaining)n=remaining;
         cl_mem seg=s->segment[seg_index];
-        cl_int rc=write_operation
-            ?clEnqueueWriteBuffer(s->queue,seg,CL_TRUE,seg_off,n,host,0,NULL,NULL)
-            :clEnqueueReadBuffer(s->queue,seg,CL_TRUE,seg_off,n,host,0,NULL,NULL);
+        cl_int rc=CL_SUCCESS;
+        if(!s->pinned_host) {
+            rc=write_operation
+                ?clEnqueueWriteBuffer(s->queue,seg,CL_TRUE,seg_off,n,host,0,NULL,NULL)
+                :clEnqueueReadBuffer(s->queue,seg,CL_TRUE,seg_off,n,host,0,NULL,NULL);
+        } else {
+            /* A mapped host allocation MUST be unmapped before any
+             * device copy can use it. Finish each bounded operation:
+             * never expose in-flight DMA to a reused staging buffer. */
+            if(n>s->pinned_bytes)return fail(s,"pinned staging bounds");
+            if(write_operation) {
+                void *ptr=clEnqueueMapBuffer(s->queue,s->pinned_host,CL_TRUE,
+                    CL_MAP_WRITE,0,n,0,NULL,NULL,&rc);
+                if(rc==CL_SUCCESS && ptr) {
+                    memcpy(ptr,host,n);
+                    rc=clEnqueueUnmapMemObject(s->queue,s->pinned_host,
+                                               ptr,0,NULL,NULL);
+                    if(rc==CL_SUCCESS)rc=clEnqueueCopyBuffer(s->queue,
+                        s->pinned_host,seg,0,seg_off,n,0,NULL,NULL);
+                    if(rc==CL_SUCCESS)rc=clFinish(s->queue);
+                } else if(rc==CL_SUCCESS)rc=CL_MAP_FAILURE;
+            } else {
+                rc=clEnqueueCopyBuffer(s->queue,seg,s->pinned_host,
+                                       seg_off,0,n,0,NULL,NULL);
+                if(rc==CL_SUCCESS) {
+                    void *ptr=clEnqueueMapBuffer(s->queue,s->pinned_host,
+                        CL_TRUE,CL_MAP_READ,0,n,0,NULL,NULL,&rc);
+                    if(rc==CL_SUCCESS && ptr) {
+                        memcpy(host,ptr,n);
+                        rc=clEnqueueUnmapMemObject(s->queue,s->pinned_host,
+                                                   ptr,0,NULL,NULL);
+                        if(rc==CL_SUCCESS)rc=clFinish(s->queue);
+                    } else if(rc==CL_SUCCESS)rc=CL_MAP_FAILURE;
+                }
+            }
+        }
         if(rc!=CL_SUCCESS) {
             snprintf(s->error,sizeof(s->error),"OpenCL batch %s failed rc=%d",
                      write_operation?"write":"read",rc);
