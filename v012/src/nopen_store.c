@@ -82,8 +82,18 @@ static int open_opencl(nopen_store *s,size_t bytes) {
         return fail(s,"VRAM reservation would leave insufficient GPU budget");
     s->ctx=clCreateContext(NULL,1,&gpu,NULL,NULL,&rc);
     if(rc!=CL_SUCCESS||!s->ctx)return fail(s,"clCreateContext failed");
-    s->queue=clCreateCommandQueue(s->ctx,gpu,CL_QUEUE_PROFILING_ENABLE,&rc);
+    /* Alpha.1 throughput hygiene: command timing is disabled unless
+     * explicitly requested for a profiling experiment. Profiling may
+     * incur additional driver/event bookkeeping even with blocking copies.
+     * Keep the queue IN ORDER to preserve page write/read sequencing.
+     * This is a candidate optimization, not a proven speedup yet. */
+    const char *profile=getenv("NOPEN_OPENCL_PROFILE");
+    const cl_command_queue_properties props=
+        (profile && strcmp(profile,"1")==0)?CL_QUEUE_PROFILING_ENABLE:0;
+    s->queue=clCreateCommandQueue(s->ctx,gpu,props,&rc);
     if(rc!=CL_SUCCESS||!s->queue)return fail(s,"clCreateCommandQueue failed");
+    fprintf(stderr,"NOPEN_V080_OPENCL_QUEUE profiling=%s in_order=YES\n",
+            props?"ENABLED":"DISABLED");
     for(size_t off=0;off<bytes;off+=SEG_BYTES) {
         size_t len=bytes-off<SEG_BYTES?bytes-off:SEG_BYTES;
         if((cl_ulong)len>max_alloc)return fail(s,"segment exceeds max GPU allocation");
