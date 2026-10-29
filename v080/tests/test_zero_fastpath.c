@@ -18,7 +18,12 @@ int main(int argc,char **argv) {
     /* O_EXCL implementation creates the shadow: mkstemp would be wrong. */
     char *x=strstr(filename,"XXXXXX");
     CHECK(x!=NULL);
-    snprintf(x,7,"%06ld",(long)getpid()%1000000L);
+    unsigned unique=(unsigned)getpid()%1000000u;
+    for(int i=5;i>=0;i--) {
+        x[i]=(char)('0'+unique%10u);
+        unique/=10u;
+    }
+    x[6]=0;
     CHECK(access(filename,F_OK)!=0);
     nopen_shadow *s=NULL;
     CHECK(nopen_shadow_open(&s,NOPEN_STORE_MOCK,4,500,argv[1],filename)==0);
