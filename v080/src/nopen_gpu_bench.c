@@ -87,7 +87,7 @@ static int check_gpu_budget(size_t mib) {
         char base[512],path[640];
         if(snprintf(base,sizeof base,"/sys/bus/pci/devices/%s",ent->d_name)<0)
             continue;
-        uint64_t vendor=0,cls=0,t=0,u=0;
+        uint64_t t=0,u=0;
         snprintf(path,sizeof path,"%s/vendor",base);
         FILE *f=fopen(path,"r");if(!f)continue;
         unsigned long long v=0;
@@ -106,10 +106,9 @@ static int check_gpu_budget(size_t mib) {
         if(read_u64(path,&u)!=0)continue;
         if(u>t || t==0){closedir(d);return -1;}
         selected++;
-        total=t;used=u;vendor=v;cls=c;
+        total=t;used=u;
     }
     closedir(d);
-    (void)vendor;(void)cls;
     if(selected!=1)return -1;
     const uint64_t reserve=(uint64_t)mib*MIB;
     const uint64_t headroom=4ull*1024ull*MIB;
@@ -254,8 +253,8 @@ int main(int argc,char **argv) {
             else operations=(size_t)x;
         } else return 2;
     }
-    if(!backend_text || !mode || strcmp(mode,"direct") &&
-       strcmp(mode,"pinned"))return 2;
+    if(!backend_text || !mode ||
+       (strcmp(mode,"direct")!=0 && strcmp(mode,"pinned")!=0))return 2;
     const nopen_backend backend=!strcmp(backend_text,"opencl")
        ?NOPEN_STORE_OPENCL:!strcmp(backend_text,"mock")?NOPEN_STORE_MOCK:0;
     if(!backend || geteuid()==0 || !no_gpu_swap_active() ||
