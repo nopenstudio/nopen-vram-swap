@@ -18,7 +18,7 @@ for mib in (1024,2048,4096):
     assert r["logical_pages"]==mib*256
     assert r["highest_page_byte_offset"]==mib*1048576-4096
     assert r["known_metadata_estimate_mib"] in (6,12,24)
-    assert not r["kernel_swap_enabled"] and not r["actual_gpu_allocated"]
+    assert not r["kernel_swap_activated_by_planner"] and not r["actual_gpu_allocated"]
     assert not r["performance_gain_proven"]
     for case in (
         planner.evaluate(mib,16304,13000,8192,2048),
@@ -50,6 +50,11 @@ with tempfile.TemporaryDirectory() as td:
     (one/"mem_info_vram_total").write_text(str(16304*1048576))
     (one/"mem_info_vram_used").write_text(str(2*1048576+1))
     assert planner.amd_discrete_vram(root)==(16304,3)
+    swaps=root/"swaps"
+    swaps.write_text("Filename Type Size Used Priority\n/dev/zram0 partition 1024 0 100\n")
+    assert not planner.gpu_kernel_swap_active(swaps)
+    swaps.write_text("Filename Type Size Used Priority\n/dev/zram0 partition 1024 0 100\n/dev/ublkb23 partition 65532 65500 200\n")
+    assert planner.gpu_kernel_swap_active(swaps)
     another=root/"0000:03:00.0";another.mkdir()
     for name in ("vendor","class","mem_info_vram_total","mem_info_vram_used"):
         (another/name).write_text((one/name).read_text())
