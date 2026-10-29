@@ -50,12 +50,13 @@ static int no_gpu_swap(void) {
     return good;
 }
 int main(int argc,char **argv) {
-    const char *worker=NULL,*file=NULL,*mode=NULL,*ack=NULL;
+    const char *worker=NULL,*file=NULL,*mode=NULL,*ack=NULL,*backend_arg=NULL;
     size_t count=128;
     for(int i=1;i<argc;i++) {
         if(i+1>=argc)return 2;
         const char *arg=argv[i++],*val=argv[i];
         if(!strcmp(arg,"--worker"))worker=val;
+        else if(!strcmp(arg,"--backend"))backend_arg=val;
         else if(!strcmp(arg,"--shadow-file"))file=val;
         else if(!strcmp(arg,"--mode"))mode=val;
         else if(!strcmp(arg,"--ack"))ack=val;
@@ -67,10 +68,14 @@ int main(int argc,char **argv) {
             count=(size_t)n;
         } else return 2;
     }
-    if(geteuid()==0 || !no_gpu_swap() || !worker || worker[0]!='/' ||
+    const nopen_backend backend=(backend_arg && !strcmp(backend_arg,"mock"))
+        ?NOPEN_STORE_MOCK:(backend_arg && !strcmp(backend_arg,"opencl"))
+        ?NOPEN_STORE_OPENCL:0;
+    if(!backend || geteuid()==0 || !no_gpu_swap() || !worker || worker[0]!='/' ||
        !file || file[0]!='/' ||
        !mode || (strcmp(mode,"direct")&&strcmp(mode,"pinned")) ||
-       !ack || strcmp(ack,"I_ACCEPT_REAL_GPU_SHADOW_NO_SWAP") ||
+       (backend==NOPEN_STORE_OPENCL &&
+         (!ack || strcmp(ack,"I_ACCEPT_REAL_GPU_SHADOW_NO_SWAP"))) ||
        count<16 || count>MAXOPS) {
         fputs("V080_SHADOW_BENCH_REFUSED requires normal user,"
               " no kernel GPU swap and explicit GPU-only shadow ack\n",stderr);
@@ -78,10 +83,10 @@ int main(int argc,char **argv) {
     }
     if(setenv("NOPEN_V080_IO_MODE",mode,1)!=0)return 2;
     nopen_shadow *shadow=NULL;
-    printf("V080_SHADOW_BENCH_START mode=%s capacity_mib=64"
-           " disk_write_through=YES kernel_swap=NO\n",mode);
+    printf("V080_SHADOW_BENCH_START backend=%s mode=%s capacity_mib=64"
+           " disk_write_through=YES kernel_swap=NO\n",backend_arg,mode);
     fflush(stdout);
-    int rc=nopen_shadow_open(&shadow,NOPEN_STORE_OPENCL,64,2000,worker,file);
+    int rc=nopen_shadow_open(&shadow,backend,64,2000,worker,file);
     if(rc!=0) {
         fprintf(stderr,"V080_SHADOW_BENCH_OPEN_FAILED rc=%d\n",rc);
         return 3;
@@ -114,13 +119,13 @@ int main(int argc,char **argv) {
         }
         if(total_w<=0 || total_r<=0)goto finish;
         double moved_mib=(double)(len*count)/MIB;
-        printf("V080_SHADOW_BENCH_RESULT backend=opencl mode=%s"
+        printf("V080_SHADOW_BENCH_RESULT backend=%s mode=%s"
                " chunk_kib=%zu operations=%zu"
                " write_mib_s=%.2f read_mib_s=%.2f"
                " write_p95_us=%.2f read_p95_us=%.2f"
                " gpu_worker_ipc=YES disk_write_through=YES"
                " all_bytes_verified=YES kernel_swap=NO\n",
-               mode,len/1024u,count,
+               backend_arg,mode,len/1024u,count,
                moved_mib/(total_w/1e9),moved_mib/(total_r/1e9),
                p95(w,count),p95(rd,count));
         fflush(stdout);
@@ -142,9 +147,10 @@ int main(int argc,char **argv) {
        st.gpu_active || st.shadow_reads<2 ||
        st.gpu_reads<2*count || st.gpu_writes<2*count)
         goto finish;
-    printf("V080_SHADOW_BENCH_PASS mode=%s real_gpu=YES"
+    printf("V080_SHADOW_BENCH_PASS backend=%s mode=%s real_gpu=%s"
            " disk_backup_after_worker_loss=YES"
-           " data_integrity=YES kernel_swap=NO\n",mode);
+           " data_integrity=YES kernel_swap=NO\n",backend_arg,mode,
+           backend==NOPEN_STORE_OPENCL?"YES":"NO");
     result=0;
 finish:
     nopen_shadow_close(shadow);
