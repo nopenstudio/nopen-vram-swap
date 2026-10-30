@@ -60,3 +60,17 @@ add_test(NAME v080_alpha2_real_ssd_shadow_write_through_and_worker_failover_mock
          --shadow-file "${CMAKE_CURRENT_BINARY_DIR}/v080-alpha2-shadow-mock.bin")
 set_tests_properties(v080_alpha2_real_ssd_shadow_write_through_and_worker_failover_mock PROPERTIES
  PASS_REGULAR_EXPRESSION "V080_SHADOW_BENCH_PASS" TIMEOUT 40)
+
+# Alpha.3: tagged full-arena multi-pass integrity on mock only in CI.
+# Never allocates real 2GiB GPU or modifies kernel SWAP.
+add_test(NAME v080_alpha3_mock_tagged_pages_two_passes
+ COMMAND nopen-v080-gpu-bench --backend mock --mode direct
+         --pool-mib 16 --full-passes 2 --operations 32)
+set_tests_properties(v080_alpha3_mock_tagged_pages_two_passes PROPERTIES
+ PASS_REGULAR_EXPRESSION "tagged_page_ids=YES verified_pass=2" TIMEOUT 45)
+add_test(NAME v080_alpha3_reject_4g_and_weak_guard
+ COMMAND "${Python3_EXECUTABLE}"
+         "${CMAKE_CURRENT_LIST_DIR}/tests/test_alpha3_guard.py"
+         $<TARGET_FILE:nopen-v080-gpu-bench>)
+set_tests_properties(v080_alpha3_reject_4g_and_weak_guard PROPERTIES
+ PASS_REGULAR_EXPRESSION "V080_ALPHA3_CLI_GUARD_PASS" TIMEOUT 15)
