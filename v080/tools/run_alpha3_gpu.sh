@@ -17,7 +17,7 @@ if ps -eo rss,comm --no-headers | awk '$2=="Starter" && $1>524288{found=1}END{ex
   echo "V080_ALPHA3_REFUSED large Wine Starter detected; close Bannerlord" >&2
   exit 2
 fi
-if pgrep -afi 'Bannerlord\\.(Native|exe)' >/dev/null 2>&1; then
+if pgrep -afi 'Bannerlord\.(Native|exe)' >/dev/null 2>&1; then
   echo "V080_ALPHA3_REFUSED Bannerlord game detected; close it" >&2
   exit 2
 fi
@@ -45,5 +45,5 @@ timeout --signal=TERM --kill-after=5s 600s \
 grep -Eq 'V080_GPU_FULL_ARENA_VERIFIED .*capacity_mib=2048 .*verified_pass=2 ' "$out/gpu-direct.log"
 grep -Eq 'V080_GPU_BENCH_PASS .*capacity_mib=2048 .*full_passes_completed=2 ' "$out/gpu-direct.log"
 echo "V080_ALPHA3_LOCAL_PASS real_gpu=YES capacity_mib=2048 full_passes=2 kernel_swap=NO"
-echo "V080_ALPHA3_REPORT_FILES=$out/{gpu-direct.log,metadata.txt,capacity.log}"
+echo "V080_ALPHA3_REPORT_FILES=$out/gpu-direct.log $out/metadata.txt $out/capacity.log"
 echo "V080_ALPHA3_NOTE No kernel SWAP activated. Bannerlord game test is NOT part of alpha.3."
