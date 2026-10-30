@@ -235,6 +235,13 @@ int nopen_shadow_open(nopen_shadow **out,nopen_backend backend,
             goto open_error;
         }
         init_calls++;
+        if(mib>=1024 && (first+count)%(512u*MIB/PAGE)==0) {
+            fprintf(stderr,"NOPEN_V080_SHADOW_INIT_PROGRESS"
+                           " completed_mib=%zu total_mib=%zu"
+                           " kernel_swap=NOT_YET\n",
+                    (first+count)*PAGE/MIB,mib);
+            fflush(stderr);
+        }
     }
     free(init_buffer);
     if(fdatasync(s->fd)!=0)goto open_error;
