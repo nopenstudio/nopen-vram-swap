@@ -23,6 +23,13 @@ add_test(NAME v080_alpha6_async_GPU_copy_does_not_block_swap_ack
   COMMAND nopen-test-shadow-async $<TARGET_FILE:nopen-isolated-worker> "${CMAKE_CURRENT_BINARY_DIR}")
 set_tests_properties(v080_alpha6_async_GPU_copy_does_not_block_swap_ack
   PROPERTIES PASS_REGULAR_EXPRESSION "V080_ASYNC_SHADOW_PASS" TIMEOUT 45)
+add_executable(nopen-test-shadow-concurrent tests/test_shadow_concurrent.c)
+target_link_libraries(nopen-test-shadow-concurrent PRIVATE nopen_shadow)
+target_compile_options(nopen-test-shadow-concurrent PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_test(NAME v080_alpha8_concurrent_shadow_io_and_gpu_worker
+ COMMAND nopen-test-shadow-concurrent $<TARGET_FILE:nopen-isolated-worker> "${CMAKE_CURRENT_BINARY_DIR}")
+set_tests_properties(v080_alpha8_concurrent_shadow_io_and_gpu_worker
+ PROPERTIES PASS_REGULAR_EXPRESSION "V080_ALPHA8_CONCURRENT_IO_PASS" TIMEOUT 60)
 add_executable(nopen-shadow-smoke src/nopen_shadow_smoke.c)
 target_link_libraries(nopen-shadow-smoke PRIVATE nopen_shadow)
 target_compile_options(nopen-shadow-smoke PRIVATE -Wall -Wextra -Wpedantic -Werror)
