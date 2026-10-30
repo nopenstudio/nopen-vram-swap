@@ -1,0 +1,52 @@
+name: v0.8 alpha.7 async durable 4GiB SWAP
+on:
+  push:
+    branches: ["develop/v0.8.0-alpha.7"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  safety-and-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate real 4GiB admission control without changing SWAP
+        run: |
+          bash -n v070/tools/vram_swap_lab.sh
+          bash -n v070/tools/build_ublk.sh
+          bash -n v080/tools/run_alpha7_async_gpu_diagnostics.sh
+          python3 v070/tests/test_swap_policy.py v070/tools/vram_swap_lab.sh
+          cmake -S v080 -B build-a7-mock -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-a7-mock --parallel
+          ctest --test-dir build-a7-mock --output-on-failure
+          echo "V080_ALPHA7_GATE_CI_PASS real_swap_activated=NO"
+  physical-ublk-compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned libublksrv toolchain and OpenCL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake libtool pkg-config g++ cmake \
+            liburing-dev ocl-icd-opencl-dev opencl-headers util-linux
+      - name: Build complete actual Linux ublk GPU-SWAP program (no swapon)
+        run: |
+          bash v070/tools/build_ublk.sh
+          test -x build-v070/nopen-v070-ublk
+          test -x build-v070/ublksrv-upstream/ublk
+          echo "V080_ALPHA7_REAL_UBLK_COMPILE_PASS physical_gpu_swap_executed=NO"
+  mock-4gib-storage:
+    needs: safety-and-regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: 4GiB offline SSD shadow, no kernel SWAP
+        run: |
+          cmake -S v080 -B build-a7-mock -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-a7-mock --parallel
+          ./build-a7-mock/nopen-v080-scale \
+            "$GITHUB_WORKSPACE/build-a7-mock/v070/v060/nopen-isolated-worker" \
+            "$RUNNER_TEMP/v080-alpha7-4gib-shadow.bin" 4096
