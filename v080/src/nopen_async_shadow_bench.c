@@ -36,18 +36,23 @@ static int has_kernel_gpu_swap(void) {
 int main(int argc,char **argv) {
     const char *worker=NULL,*disk=NULL;
     nopen_backend backend=0;
+    const char *mode="async";
     size_t mib=4,ops=2000;
     for(int i=1;i<argc;i++) {
         if(!strcmp(argv[i],"--help")) {
             puts("Nopen v080 alpha6 async GPU cache benchmark (NO kernel SWAP):"
                  " --worker /abs/path --shadow-file /abs/disk/path"
-                 " --backend mock|opencl --capacity-mib 4|4096"
-                 " --operations 100..10000");
+                 " --backend mock|opencl --capacity-mib 4|256|4096"
+                 " --mode sync|async --operations 100..10000");
             return 0;
         }
         if(i+1>=argc)return 2;
         const char *key=argv[i++],*value=argv[i];
         if(!strcmp(key,"--worker"))worker=value;
+        else if(!strcmp(key,"--mode")) {
+            if(strcmp(value,"async") && strcmp(value,"sync"))return 2;
+            mode=value;
+        }
         else if(!strcmp(key,"--shadow-file"))disk=value;
         else if(!strcmp(key,"--backend")) {
             if(!strcmp(value,"opencl"))backend=NOPEN_STORE_OPENCL;
@@ -64,20 +69,21 @@ int main(int argc,char **argv) {
     }
     if(geteuid()==0 || has_kernel_gpu_swap() || !backend ||
        !worker || worker[0]!='/' || !disk || disk[0]!='/' ||
-       (mib!=4 && mib!=4096) || ops<100||ops>10000) {
+       (mib!=4 && mib!=256 && mib!=4096) || ops<100||ops>10000) {
         fputs("V080_ASYNC_BENCH_REFUSED invalid args or root or GPU SWAP active\n",stderr);
         return 2;
     }
-    if(setenv("NOPEN_SHADOW_ASYNC_GPU","1",1)!=0)return 2;
+    if(setenv("NOPEN_SHADOW_ASYNC_GPU",
+              strcmp(mode,"async")==0?"1":"0",1)!=0)return 2;
     unsigned char *expected=calloc(SAMPLE_PAGES,PAGE);
     double *lat=calloc(ops,sizeof(*lat));
     unsigned char buf[PAGE],got[PAGE];
     nopen_shadow *shadow=NULL;
     int result=3;
     if(!expected||!lat)goto cleanup;
-    printf("V080_ASYNC_BENCH_START backend=%s capacity_mib=%zu"
+    printf("V080_ASYNC_BENCH_START backend=%s mode=%s capacity_mib=%zu"
            " sample_pages=%u kernel_swap=NO durable_disk=YES\n",
-           backend==NOPEN_STORE_OPENCL?"opencl":"mock",mib,SAMPLE_PAGES);
+           backend==NOPEN_STORE_OPENCL?"opencl":"mock",mode,mib,SAMPLE_PAGES);
     fflush(stdout);
     const double init_start=clock_us();
     if(nopen_shadow_open(&shadow,backend,mib,2000,worker,disk)!=0)
@@ -131,13 +137,13 @@ int main(int argc,char **argv) {
     }
     (void)seen_start;
     qsort(lat,ops,sizeof(*lat),cmp_double);
-    printf("V080_ASYNC_BENCH_PASS backend=%s capacity_mib=%zu"
+    printf("V080_ASYNC_BENCH_PASS backend=%s mode=%s capacity_mib=%zu"
            " operations=%zu verified_pages=%zu gpu_worker_loss=YES"
            " init_s=%.3f write_s=%.3f write_p50_us=%.2f"
            " write_p95_us=%.2f enqueued=%" PRIu64
            " dropped=%" PRIu64 " gpu_completed=%" PRIu64
            " kernel_swap=NO\n",
-           backend==NOPEN_STORE_OPENCL?"opencl":"mock",mib,
+           backend==NOPEN_STORE_OPENCL?"opencl":"mock",mode,mib,
            ops,verified,init_s,write_s,lat[ops/2],lat[(ops*95)/100],
            stats.async_enqueued,stats.async_dropped,stats.gpu_writes);
     result=0;
