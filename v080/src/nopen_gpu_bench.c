@@ -331,13 +331,31 @@ static int run(nopen_backend backend,size_t mib,const char *mode,
             }
             if(second%5==0) {
                 const size_t pages=bytes/PAGE;
-                const size_t page=((second/5)*7919u)%pages;
-                fill_pattern(source,PAGE,(uint64_t)page*PAGE,generation);
+                /* Start at a nonzero offset so regression tests detect
+                 * an incorrect expected-pattern coordinate immediately. */
+                const size_t page=(((second/5)+1u)*7919u)%pages;
+                const size_t pages_per_chunk=BUFFER_BYTES/PAGE;
+                const size_t chunk_page=page/pages_per_chunk;
+                const size_t offset_in_chunk=(page%pages_per_chunk)*PAGE;
+                /* The arena was populated with 4MiB staging buffers.
+                 * fill_pattern() uses the byte index WITHIN that buffer
+                 * (i*13 and i>>7), not the index within a 4KiB page.
+                 * Regenerate the original chunk, then compare only the
+                 * selected page. A standalone 4KiB fill causes a false
+                 * integrity failure for nonzero page offsets. */
+                fill_pattern(source,BUFFER_BYTES,
+                             (uint64_t)chunk_page*BUFFER_BYTES,generation);
                 if(nopen_store_read_pages(store,page,got,1)!=0 ||
-                   memcmp(source,got,PAGE)!=0) {
-                    fputs("V080_GAME_HOLD_FAILED phase=sample_page_integrity\n",stderr);
+                   memcmp(source+offset_in_chunk,got,PAGE)!=0) {
+                    fprintf(stderr,"V080_GAME_HOLD_FAILED"
+                            " phase=sample_page_integrity page=%zu"
+                            " chunk_page=%zu\n",page,page%pages_per_chunk);
                     nopen_store_close(store);free(source);free(got);return 11;
                 }
+                printf("V080_GAME_HOLD_SAMPLE_VERIFIED page=%zu"
+                       " chunk_page=%zu generation=%" PRIu64 "\n",
+                       page,page%pages_per_chunk,generation);
+                fflush(stdout);
             }
             struct timespec wait={.tv_sec=1,.tv_nsec=0};
             while(nanosleep(&wait,&wait)!=0 && errno==EINTR) {}
