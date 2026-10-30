@@ -1,7 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
-/* v0.8 alpha.2: exactly 1GiB AMD OpenCL transfer experiment, NO kernel swap.
+/* v0.8 alpha.3: 1/2GiB AMD OpenCL transfer experiments, NO kernel swap.
  * Two modes use the same nopen_store API: direct or explicitly pinned host.
- * 4MiB buffers; full 1GiB GPU write/read verification with bounded host RAM.
+ * 4MiB buffers; all pages verified with per-page identity tags and bounded host RAM.
  * Mock backend is only for CI validation, never evidence of GPU performance. */
 #include "nopen_store.h"
 #include <dirent.h>
@@ -47,6 +47,17 @@ static void fill_pattern(unsigned char *buffer,size_t bytes,uint64_t address,
     for(size_t i=0;i<bytes;i++) {
         uint64_t pg=(address+i)/PAGE;
         buffer[i]=(unsigned char)((pg*37u)+(i*13u)+(i>>7)+(iteration*19u));
+    }
+    /* Old 8-bit pattern repeats every 256 pages: a misaddressed buffer
+     * could appear correct. Stamp the absolute 64-bit page number and
+     * generation in each 4KiB page to reject aliasing across the arena.
+     * All benchmark transfers are page-aligned and page-sized. */
+    for(size_t off=0;off<bytes;off+=PAGE) {
+        const uint64_t id=(address+off)/PAGE;
+        for(unsigned j=0;j<8;j++) {
+            buffer[off+j]=(unsigned char)(id>>(j*8u));
+            buffer[off+8u+j]=(unsigned char)(iteration>>(j*8u));
+        }
     }
 }
 static int no_gpu_swap_active(void) {
@@ -149,7 +160,7 @@ static int checked_io(nopen_store *store,size_t offset,unsigned char *source,
     return 0;
 }
 static int run(nopen_backend backend,size_t mib,const char *mode,
-               size_t operations) {
+               size_t operations,size_t full_passes) {
     const size_t bytes=mib*MIB;
     unsigned char *source=NULL,*got=NULL;
     if(posix_memalign((void **)&source,PAGE,BUFFER_BYTES)!=0 ||
@@ -167,38 +178,42 @@ static int run(nopen_backend backend,size_t mib,const char *mode,
               " no fallback to host RAM\n",stderr);
         free(source);free(got);return 5;
     }
-    /* PROVE simultaneous 1GiB logical residency: first write the ENTIRE
-     * pool, then separately read and verify the ENTIRE pool. Immediate
-     * write-then-read alone would miss aliasing between later chunks.
-     * Never allocate 1GiB host RAM or enable kernel SWAP. */
-    for(size_t offset=0;offset<bytes;offset+=BUFFER_BYTES) {
-        const size_t len=(bytes-offset<BUFFER_BYTES)
-                        ?bytes-offset:BUFFER_BYTES;
-        fill_pattern(source,len,(uint64_t)offset,0);
-        if(nopen_store_write_pages(store,offset/PAGE,source,len/PAGE)!=0) {
-            fprintf(stderr,"V080_GPU_INTEGRITY_FAILED"
-                    " phase=full_arena_write offset=%zu\n",offset);
-            nopen_store_close(store);free(source);free(got);return 6;
+    /* Prove non-aliasing simultaneous residency with complete tagged writes
+     * first, then a distinct complete read pass. Repeating with a new
+     * generation catches stale pages; host staging stays at 8MiB.
+     * There is NO block device, kernel SWAP, or disk write here. */
+    for(size_t pass=0;pass<full_passes;pass++) {
+        for(size_t offset=0;offset<bytes;offset+=BUFFER_BYTES) {
+            const size_t len=(bytes-offset<BUFFER_BYTES)
+                            ?bytes-offset:BUFFER_BYTES;
+            fill_pattern(source,len,(uint64_t)offset,(uint64_t)pass);
+            if(nopen_store_write_pages(store,offset/PAGE,source,len/PAGE)!=0) {
+                fprintf(stderr,"V080_GPU_INTEGRITY_FAILED"
+                        " phase=full_arena_write pass=%zu offset=%zu\n",pass+1,offset);
+                nopen_store_close(store);free(source);free(got);return 6;
+            }
         }
-    }
-    for(size_t offset=0;offset<bytes;offset+=BUFFER_BYTES) {
-        const size_t len=(bytes-offset<BUFFER_BYTES)
-                        ?bytes-offset:BUFFER_BYTES;
-        fill_pattern(source,len,(uint64_t)offset,0);
-        if(nopen_store_read_pages(store,offset/PAGE,got,len/PAGE)!=0 ||
-           memcmp(source,got,len)!=0) {
-            fprintf(stderr,"V080_GPU_INTEGRITY_FAILED"
-                    " phase=full_arena_read_after_all_writes offset=%zu\n",
-                    offset);
-            nopen_store_close(store);free(source);free(got);return 6;
+        for(size_t offset=0;offset<bytes;offset+=BUFFER_BYTES) {
+            const size_t len=(bytes-offset<BUFFER_BYTES)
+                            ?bytes-offset:BUFFER_BYTES;
+            fill_pattern(source,len,(uint64_t)offset,(uint64_t)pass);
+            if(nopen_store_read_pages(store,offset/PAGE,got,len/PAGE)!=0 ||
+               memcmp(source,got,len)!=0) {
+                fprintf(stderr,"V080_GPU_INTEGRITY_FAILED"
+                        " phase=full_arena_read_after_all_writes pass=%zu offset=%zu\n",
+                        pass+1,offset);
+                nopen_store_close(store);free(source);free(got);return 6;
+            }
         }
+        printf("V080_GPU_FULL_ARENA_VERIFIED backend=%s mode=%s"
+               " capacity_mib=%zu full_bytes_checked=%zu"
+               " all_writes_before_reads=YES simultaneous_logical_capacity=YES"
+               " tagged_page_ids=YES verified_pass=%zu"
+               " host_staging_mib=8 kernel_swap=NO\n",
+               backend==NOPEN_STORE_OPENCL?"opencl":"mock",
+               mode,mib,bytes,pass+1);
+        fflush(stdout);
     }
-    printf("V080_GPU_FULL_ARENA_VERIFIED backend=%s mode=%s"
-           " capacity_mib=%zu full_bytes_checked=%zu"
-           " all_writes_before_reads=YES simultaneous_logical_capacity=YES"
-           " host_staging_mib=8 kernel_swap=NO\n",
-           backend==NOPEN_STORE_OPENCL?"opencl":"mock",
-           mode,mib,bytes);
     const size_t chunk_sizes[]={PAGE,16u*PAGE,MIB,BUFFER_BYTES};
     for(size_t c=0;c<sizeof chunk_sizes/sizeof chunk_sizes[0];c++) {
         const size_t chunk=chunk_sizes[c];
@@ -241,16 +256,16 @@ static int run(nopen_backend backend,size_t mib,const char *mode,
     }
     printf("V080_GPU_BENCH_PASS backend=%s mode=%s capacity_mib=%zu"
            " full_arena_integrity=YES kernel_swap=NO"
-           " elapsed_seconds=%.3f\n",
+           " full_passes_completed=%zu elapsed_seconds=%.3f\n",
            backend==NOPEN_STORE_OPENCL?"opencl":"mock",mode,mib,
-           (time_ns()-start)/1.0e9);
+           full_passes,(time_ns()-start)/1.0e9);
     nopen_store_close(store);
     free(source);free(got);
     return 0;
 }
 int main(int argc,char **argv) {
     const char *backend_text=NULL,*mode=NULL,*ack=NULL;
-    size_t mib=0,operations=128;
+    size_t mib=0,operations=128,full_passes=1;
     for(int i=1;i<argc;i++) {
         if(i+1>=argc)return 2;
         const char *key=argv[i++],*val=argv[i];
@@ -258,12 +273,14 @@ int main(int argc,char **argv) {
         else if(!strcmp(key,"--mode"))mode=val;
         else if(!strcmp(key,"--ack"))ack=val;
         else if(!strcmp(key,"--pool-mib") ||
-                !strcmp(key,"--operations")) {
+                !strcmp(key,"--operations") ||
+                !strcmp(key,"--full-passes")) {
             if(val[0]=='+' || val[0]=='-')return 2;
             char *end=NULL;errno=0;
             unsigned long x=strtoul(val,&end,10);
             if(errno || end==val || *end)return 2;
             if(!strcmp(key,"--pool-mib"))mib=(size_t)x;
+            else if(!strcmp(key,"--full-passes"))full_passes=(size_t)x;
             else operations=(size_t)x;
         } else return 2;
     }
@@ -271,14 +288,23 @@ int main(int argc,char **argv) {
        (strcmp(mode,"direct")!=0 && strcmp(mode,"pinned")!=0))return 2;
     const nopen_backend backend=!strcmp(backend_text,"opencl")
        ?NOPEN_STORE_OPENCL:!strcmp(backend_text,"mock")?NOPEN_STORE_MOCK:0;
+    /* 4GiB remains OFFLINE ONLY in alpha.3. A planner PASS is not
+     * authorization to allocate GPU memory or activate kernel SWAP. */
+    const char *required_ack=
+        (mib==1024)?"I_ACCEPT_1GIB_GPU_ONLY_NO_SWAP":
+        (mib==2048)?"I_ACCEPT_2GIB_GPU_ONLY_NO_SWAP":NULL;
     if(!backend || geteuid()==0 || !no_gpu_swap_active() ||
        operations<16 || operations>MEASURE_MAX ||
+       full_passes<1 || full_passes>4 ||
        (backend==NOPEN_STORE_OPENCL
-         ?(mib!=1024 || !ack || strcmp(ack,"I_ACCEPT_1GIB_GPU_ONLY_NO_SWAP"))
-         :(mib<4 || mib>32))) {
+          ?(!required_ack || !ack || strcmp(ack,required_ack)!=0 ||
+             (mib==2048 && full_passes<2))
+          :(mib<4 || mib>32))) {
         fputs("V080_GPU_BENCH_REFUSED safety guard: no root/ublk swap;"
-              " real OpenCL ONLY 1024MiB with --ack"
-              " I_ACCEPT_1GIB_GPU_ONLY_NO_SWAP; mock 4..32MiB\n",stderr);
+              " OpenCL 1024MiB with --ack I_ACCEPT_1GIB_GPU_ONLY_NO_SWAP,"
+              " or 2048MiB with --full-passes 2 and"
+              " --ack I_ACCEPT_2GIB_GPU_ONLY_NO_SWAP;"
+              " mock 4..32MiB; 4096MiB NOT AUTHORIZED\n",stderr);
         return 2;
     }
     if(backend==NOPEN_STORE_OPENCL &&
@@ -292,5 +318,5 @@ int main(int argc,char **argv) {
            " real_gpu=%s\n",backend_text,mode,mib,
            backend==NOPEN_STORE_OPENCL?"YES":"NO");
     fflush(stdout);
-    return run(backend,mib,mode,operations);
+    return run(backend,mib,mode,operations,full_passes);
 }
