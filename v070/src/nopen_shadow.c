@@ -46,8 +46,10 @@ struct nopen_shadow {
     /* v0.8 alpha.6 opt-in: unlink page-out acknowledgement from GPU IPC.
      * Acknowledgement still requires the full O_DIRECT|O_DSYNC disk write. */
     int async_gpu,async_started,async_stop,gpu_busy,cv_initialized;
+    int upload_lock_initialized;
     pthread_t uploader;
     pthread_cond_t upload_cv;
+    pthread_mutex_t upload_lock;
     gpu_upload_job *upload_jobs;
     size_t upload_head,upload_count;
     uint64_t *page_versions;
@@ -64,20 +66,25 @@ static int all_gpu_valid(const nopen_shadow *s,size_t first,size_t pages) {
              (unsigned char)(1u<<((first+i)&7u))))return 0;
     return 1;
 }
+/* The upload thread must NEVER share a mutex with a synchronous SSD
+ * O_DSYNC write. Alpha.6 did so, and a 2.1s/2000-write hardware run
+ * completed only 2 GPU uploads (34 queued) at 256MiB. A separate queue
+ * mutex lets the GPU worker drain while the disk write is blocked. */
 static void *gpu_upload_worker(void *arg) {
     nopen_shadow *s=arg;
-    pthread_mutex_lock(&s->lock);
+    pthread_mutex_lock(&s->upload_lock);
     for(;;) {
         while(!s->async_stop && !s->upload_count)
-            pthread_cond_wait(&s->upload_cv,&s->lock);
-        /* Teardown never drops ACKed data: SSD already stores every write.
-         * Pending GPU-cache uploads may safely be discarded on shutdown. */
-        if(s->async_stop || !s->gpu_active)break;
+            pthread_cond_wait(&s->upload_cv,&s->upload_lock);
+        if(s->async_stop)break;
         gpu_upload_job *job=&s->upload_jobs[s->upload_head];
         s->gpu_busy=1;
-        pthread_mutex_unlock(&s->lock);
+        pthread_mutex_unlock(&s->upload_lock);
         const int rc=nopen_isolated_write(s->gpu,job->offset,
                                           job->payload,job->length);
+        /* Publication of GPU validity uses the disk metadata mutex;
+         * GPU payload is never used for swap-in until its version matches
+         * the last ACKed SSD write. No GPU IPC while holding this lock. */
         pthread_mutex_lock(&s->lock);
         if(rc!=0) {
             s->gpu_active=0;s->stats.gpu_active=0;s->stats.gpu_failures++;
@@ -87,26 +94,32 @@ static void *gpu_upload_worker(void *arg) {
         } else {
             for(size_t i=0;i<job->length/PAGE;i++) {
                 const size_t page=(size_t)(job->offset/PAGE)+i;
-                /* Rewrites race asynchronously. Never mark stale GPU
-                 * content valid after a newer disk-backed ACK. */
                 if(s->page_versions[page]==job->versions[i])
                     gpu_bit(s,page,1);
             }
             s->stats.gpu_writes++;
         }
+        pthread_mutex_unlock(&s->lock);
+        pthread_mutex_lock(&s->upload_lock);
         s->upload_head=(s->upload_head+1u)%GPU_QUEUE_SLOTS;
         s->upload_count--;
         s->gpu_busy=0;
+        if(rc!=0) {
+            /* GPU cache may be abandoned: durable SSD authority remains.
+             * Do not retain undrainable stale queue entries. */
+            s->upload_count=0;
+            break;
+        }
     }
-    pthread_mutex_unlock(&s->lock);
+    pthread_mutex_unlock(&s->upload_lock);
     return NULL;
 }
 static void stop_async_worker(nopen_shadow *s) {
     if(!s || !s->async_started)return;
-    pthread_mutex_lock(&s->lock);
+    pthread_mutex_lock(&s->upload_lock);
     s->async_stop=1;
     pthread_cond_signal(&s->upload_cv);
-    pthread_mutex_unlock(&s->lock);
+    pthread_mutex_unlock(&s->upload_lock);
     pthread_join(s->uploader,NULL);
     s->async_started=0;
 }
@@ -266,6 +279,10 @@ int nopen_shadow_open(nopen_shadow **out,nopen_backend backend,
         if(!s->page_versions || !s->gpu_valid_bits || !s->upload_jobs) {
             errno=ENOMEM;goto open_error;
         }
+        if(pthread_mutex_init(&s->upload_lock,NULL)!=0) {
+            errno=ENOMEM;goto open_error;
+        }
+        s->upload_lock_initialized=1;
         if(pthread_cond_init(&s->upload_cv,NULL)!=0) {
             errno=ENOMEM;goto open_error;
         }
@@ -313,6 +330,7 @@ open_error:
      nopen_isolated_close(s->gpu);
      if(s->fd>=0){close(s->fd);unlink(path);}
      if(s->cv_initialized)pthread_cond_destroy(&s->upload_cv);
+     if(s->upload_lock_initialized)pthread_mutex_destroy(&s->upload_lock);
      pthread_mutex_destroy(&s->lock);
      free(s->upload_jobs);free(s->page_versions);free(s->gpu_valid_bits);
      free(s->aligned);free(s->written_bits);free(s->checksums);free(s);
@@ -348,6 +366,7 @@ int nopen_shadow_write(nopen_shadow *s,uint64_t off,const void *src,size_t len) 
             s->page_versions[page]++;
             gpu_bit(s,page,0);
         }
+        pthread_mutex_lock(&s->upload_lock);
         if(s->gpu_active && s->upload_count<GPU_QUEUE_SLOTS) {
             const size_t tail=(s->upload_head+s->upload_count)%GPU_QUEUE_SLOTS;
             gpu_upload_job *job=&s->upload_jobs[tail];
@@ -363,6 +382,7 @@ int nopen_shadow_write(nopen_shadow *s,uint64_t off,const void *src,size_t len) 
              * only skip redundant cache upload, NEVER the disk write. */
             s->stats.async_dropped++;
         }
+        pthread_mutex_unlock(&s->upload_lock);
         if(s->stats.writes%8192u==0)
             fprintf(stderr,"NOPEN_ASYNC_SWAP_STATS writes=%llu"
                            " enqueued=%llu skipped=%llu gpu_completed=%llu"
@@ -413,10 +433,14 @@ int nopen_shadow_read(nopen_shadow *s,uint64_t off,void *dst,size_t len) {
         pthread_mutex_unlock(&s->lock);
         return 0;
     }
-    if(s->gpu_active &&
-       (!s->async_gpu ||
-        (!s->gpu_busy && !s->upload_count &&
-         all_gpu_valid(s,first,len/PAGE)))) {
+    int gpu_copy_consistent=!s->async_gpu;
+    if(s->async_gpu) {
+        pthread_mutex_lock(&s->upload_lock);
+        gpu_copy_consistent=!s->gpu_busy && !s->upload_count &&
+                            all_gpu_valid(s,first,len/PAGE);
+        pthread_mutex_unlock(&s->upload_lock);
+    }
+    if(s->gpu_active && gpu_copy_consistent) {
         const int gpu_rc=nopen_isolated_read(s->gpu,off,s->aligned,len);
         const int mismatch=gpu_rc==0 &&
                            check(s,s->aligned,first,len/PAGE)!=0;
@@ -497,6 +521,7 @@ void nopen_shadow_close(nopen_shadow *s) {
     if(s->fd>=0)close(s->fd);
     pthread_mutex_unlock(&s->lock);
     if(s->cv_initialized)pthread_cond_destroy(&s->upload_cv);
+    if(s->upload_lock_initialized)pthread_mutex_destroy(&s->upload_lock);
     pthread_mutex_destroy(&s->lock);
     free(s->upload_jobs);free(s->page_versions);free(s->gpu_valid_bits);
     free(s->aligned);free(s->written_bits);free(s->checksums);free(s);
