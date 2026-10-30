@@ -43,14 +43,15 @@ int main(int argc,char **argv) {
             puts("Nopen v080 alpha6 async GPU cache benchmark (NO kernel SWAP):"
                  " --worker /abs/path --shadow-file /abs/disk/path"
                  " --backend mock|opencl --capacity-mib 4|256|4096"
-                 " --mode sync|async --operations 100..10000");
+                 " --mode sync|async|disk-only --operations 100..10000");
             return 0;
         }
         if(i+1>=argc)return 2;
         const char *key=argv[i++],*value=argv[i];
         if(!strcmp(key,"--worker"))worker=value;
         else if(!strcmp(key,"--mode")) {
-            if(strcmp(value,"async") && strcmp(value,"sync"))return 2;
+            if(strcmp(value,"async") && strcmp(value,"sync") &&
+               strcmp(value,"disk-only"))return 2;
             mode=value;
         }
         else if(!strcmp(key,"--shadow-file"))disk=value;
@@ -74,7 +75,7 @@ int main(int argc,char **argv) {
         return 2;
     }
     if(setenv("NOPEN_SHADOW_ASYNC_GPU",
-              strcmp(mode,"async")==0?"1":"0",1)!=0)return 2;
+              strcmp(mode,"sync")==0?"0":"1",1)!=0)return 2;
     unsigned char *expected=calloc(SAMPLE_PAGES,PAGE);
     double *lat=calloc(ops,sizeof(*lat));
     unsigned char buf[PAGE],got[PAGE];
@@ -89,6 +90,12 @@ int main(int argc,char **argv) {
     if(nopen_shadow_open(&shadow,backend,mib,2000,worker,disk)!=0)
         goto cleanup;
     const double init_s=(clock_us()-init_start)/1.0e6;
+    if(strcmp(mode,"disk-only")==0) {
+        /* Baseline: real direct/synchronous SSD durability with all Nopen
+         * metadata, page checksum and locks, but WITHOUT GPU cache writes.
+         * No kernel SWAP is installed or activated. */
+        if(nopen_shadow_simulate_gpu_loss(shadow)!=0)goto cleanup;
+    }
     const size_t pages=mib*MIB/PAGE;
     const double start=clock_us();
     for(size_t i=0;i<ops;i++) {
@@ -113,7 +120,8 @@ int main(int argc,char **argv) {
     }
     const double write_s=(clock_us()-start)/1.0e6;
     nopen_shadow_stats stats={0};
-    if(nopen_shadow_get_stats(shadow,&stats)!=0)goto cleanup;
+    if(nopen_shadow_get_stats(shadow,&stats)!=0 ||
+       stats.ssd_write_samples!=ops)goto cleanup;
     /* GPU uploads are deliberately cancelled now. Every acknowledged page
      * must still round-trip from the authoritative SSD without GPU. */
     if(nopen_shadow_simulate_gpu_loss(shadow)!=0)goto cleanup;
@@ -143,13 +151,17 @@ int main(int argc,char **argv) {
            " write_p95_us=%.2f enqueued=%" PRIu64
            " dropped=%" PRIu64 " gpu_completed=%" PRIu64
            " gpu_upload_avg_us=%.2f gpu_upload_max_us=%" PRIu64
+           " ssd_write_avg_us=%.2f ssd_write_max_us=%" PRIu64
+           " ssd_write_samples=%" PRIu64
            " kernel_swap=NO\n",
            backend==NOPEN_STORE_OPENCL?"opencl":"mock",mode,mib,
            ops,verified,init_s,write_s,lat[ops/2],lat[(ops*95)/100],
            stats.async_enqueued,stats.async_dropped,stats.gpu_writes,
            stats.gpu_writes?
              (double)stats.async_gpu_upload_us_total/(double)stats.gpu_writes:0.0,
-           stats.async_gpu_upload_us_max);
+           stats.async_gpu_upload_us_max,
+           (double)stats.ssd_write_us_total/(double)stats.ssd_write_samples,
+           stats.ssd_write_us_max,stats.ssd_write_samples);
     result=0;
 cleanup:
     nopen_shadow_close(shadow);
