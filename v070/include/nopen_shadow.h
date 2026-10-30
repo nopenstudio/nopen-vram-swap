@@ -13,6 +13,7 @@ typedef struct {
     uint64_t disk_failures, backed_bytes;
     uint64_t async_enqueued, async_dropped, async_disk_reads;
     uint64_t async_gpu_upload_us_total, async_gpu_upload_us_max;
+    uint64_t ssd_write_us_total, ssd_write_us_max, ssd_write_samples;
     int gpu_active, poisoned, async_gpu_mode;
 } nopen_shadow_stats;
 
