@@ -6,6 +6,11 @@ option(NOPEN_OPENCL "Build GPU backend with AMD OpenCL" ON)
 enable_testing()
 add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../v070" "${CMAKE_CURRENT_BINARY_DIR}/v070")
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME v081_game_detection_vram_guard_and_reclaim_gate
+ COMMAND "${Python3_EXECUTABLE}"
+         "${CMAKE_CURRENT_LIST_DIR}/tests/test_v081_bannerlord_probe.py")
+set_tests_properties(v081_game_detection_vram_guard_and_reclaim_gate
+ PROPERTIES PASS_REGULAR_EXPRESSION "V081_BANNERLORD_GATES_PASS" TIMEOUT 10)
 add_executable(nopen-v080-scale src/nopen_scale_sweep.c)
 target_link_libraries(nopen-v080-scale PRIVATE nopen_shadow)
 target_compile_options(nopen-v080-scale PRIVATE -Wall -Wextra -Wpedantic -Werror)
