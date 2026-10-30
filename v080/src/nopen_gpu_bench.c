@@ -159,8 +159,49 @@ static int checked_io(nopen_store *store,size_t offset,unsigned char *source,
     if(read_ns)*read_ns=after_read-after_write;
     return 0;
 }
+/* When an experimental GPU-only arena coexists with a game, revoke the
+ * experiment if OS or GPU headroom becomes too small. It never acts on the
+ * game process, changes swapon, or launches a block device. */
+static int hold_preflight(void) {
+    if(!no_gpu_swap_active() || check_mem_available()!=0)return -1;
+    DIR *d=opendir("/sys/bus/pci/devices");
+    if(!d)return -1;
+    struct dirent *ent;
+    uint64_t total=0,used=0;
+    unsigned found=0;
+    while((ent=readdir(d))) {
+        if(ent->d_name[0]=='.')continue;
+        char p[512],name[640];
+        unsigned long long vendor=0,cls=0;
+        snprintf(p,sizeof p,"/sys/bus/pci/devices/%s",ent->d_name);
+        snprintf(name,sizeof name,"%s/vendor",p);
+        FILE *v=fopen(name,"r");
+        if(!v)continue;
+        int vok=fscanf(v,"%llx",&vendor)==1;
+        fclose(v);
+        if(!vok||vendor!=0x1002ULL)continue;
+        snprintf(name,sizeof name,"%s/class",p);
+        v=fopen(name,"r");
+        if(!v)continue;
+        vok=fscanf(v,"%llx",&cls)==1;
+        fclose(v);
+        if(!vok || (cls>>16)!=0x03)continue;
+        snprintf(name,sizeof name,"%s/mem_info_vram_total",p);
+        uint64_t t=0,u=0;
+        if(read_u64(name,&t)!=0)continue;
+        snprintf(name,sizeof name,"%s/mem_info_vram_used",p);
+        if(read_u64(name,&u)!=0 || t==0 || u>t)continue;
+        found++;total=t;used=u;
+    }
+    closedir(d);
+    if(found!=1 || total-used<2ull*1024ull*MIB)return -1;
+    printf("V080_GAME_HOLD_HEALTH vram_free_mib=%" PRIu64
+           " mem_available_over_1g=YES kernel_swap=NO\n",(total-used)/MIB);
+    fflush(stdout);
+    return 0;
+}
 static int run(nopen_backend backend,size_t mib,const char *mode,
-               size_t operations,size_t full_passes) {
+               size_t operations,size_t full_passes,size_t hold_seconds) {
     const size_t bytes=mib*MIB;
     unsigned char *source=NULL,*got=NULL;
     if(posix_memalign((void **)&source,PAGE,BUFFER_BYTES)!=0 ||
@@ -259,13 +300,70 @@ static int run(nopen_backend backend,size_t mib,const char *mode,
            " full_passes_completed=%zu elapsed_seconds=%.3f\n",
            backend==NOPEN_STORE_OPENCL?"opencl":"mock",mode,mib,
            full_passes,(time_ns()-start)/1.0e9);
+    if(hold_seconds) {
+        /* Throughput samples modify some pages. First restamp the entire
+         * arena with a single generation so hold checks stay meaningful. */
+        const uint64_t generation=0xA4u;
+        for(size_t off=0;off<bytes;off+=BUFFER_BYTES) {
+            fill_pattern(source,BUFFER_BYTES,(uint64_t)off,generation);
+            if(nopen_store_write_pages(store,off/PAGE,source,BUFFER_BYTES/PAGE)!=0) {
+                fputs("V080_GAME_HOLD_FAILED phase=restamp_write\n",stderr);
+                nopen_store_close(store);free(source);free(got);return 9;
+            }
+        }
+        for(size_t off=0;off<bytes;off+=BUFFER_BYTES) {
+            fill_pattern(source,BUFFER_BYTES,(uint64_t)off,generation);
+            if(nopen_store_read_pages(store,off/PAGE,got,BUFFER_BYTES/PAGE)!=0 ||
+               memcmp(source,got,BUFFER_BYTES)!=0) {
+                fputs("V080_GAME_HOLD_FAILED phase=restamp_read\n",stderr);
+                nopen_store_close(store);free(source);free(got);return 9;
+            }
+        }
+        printf("V080_GAME_HOLD_READY backend=%s capacity_mib=%zu hold_seconds=%zu"
+               " kernel_swap=NO gpu_pool_active=YES\n",
+               backend==NOPEN_STORE_OPENCL?"opencl":"mock",mib,hold_seconds);
+        fflush(stdout);
+        for(size_t second=0;second<hold_seconds;second++) {
+            if(backend==NOPEN_STORE_OPENCL && hold_preflight()!=0) {
+                fputs("V080_GAME_HOLD_ABORT safety_guard: low RAM/VRAM headroom"
+                      " or swap activated; releasing pool\n",stderr);
+                nopen_store_close(store);free(source);free(got);return 10;
+            }
+            if(second%5==0) {
+                const size_t pages=bytes/PAGE;
+                const size_t page=((second/5)*7919u)%pages;
+                fill_pattern(source,PAGE,(uint64_t)page*PAGE,generation);
+                if(nopen_store_read_pages(store,page,got,1)!=0 ||
+                   memcmp(source,got,PAGE)!=0) {
+                    fputs("V080_GAME_HOLD_FAILED phase=sample_page_integrity\n",stderr);
+                    nopen_store_close(store);free(source);free(got);return 11;
+                }
+            }
+            struct timespec wait={.tv_sec=1,.tv_nsec=0};
+            while(nanosleep(&wait,&wait)!=0 && errno==EINTR) {}
+        }
+        /* Full post-hold verification: close the game first to avoid
+         * a large readback burst during sensitive gameplay if possible. */
+        for(size_t off=0;off<bytes;off+=BUFFER_BYTES) {
+            fill_pattern(source,BUFFER_BYTES,(uint64_t)off,generation);
+            if(nopen_store_read_pages(store,off/PAGE,got,BUFFER_BYTES/PAGE)!=0 ||
+               memcmp(source,got,BUFFER_BYTES)!=0) {
+                fputs("V080_GAME_HOLD_FAILED phase=post_hold_full_read\n",stderr);
+                nopen_store_close(store);free(source);free(got);return 12;
+            }
+        }
+        printf("V080_GAME_HOLD_PASS backend=%s capacity_mib=%zu"
+               " full_post_hold_integrity=YES kernel_swap=NO\n",
+               backend==NOPEN_STORE_OPENCL?"opencl":"mock",mib);
+        fflush(stdout);
+    }
     nopen_store_close(store);
     free(source);free(got);
     return 0;
 }
 int main(int argc,char **argv) {
     const char *backend_text=NULL,*mode=NULL,*ack=NULL;
-    size_t mib=0,operations=128,full_passes=1;
+    size_t mib=0,operations=128,full_passes=1,hold_seconds=0;
     for(int i=1;i<argc;i++) {
         if(i+1>=argc)return 2;
         const char *key=argv[i++],*val=argv[i];
@@ -274,13 +372,15 @@ int main(int argc,char **argv) {
         else if(!strcmp(key,"--ack"))ack=val;
         else if(!strcmp(key,"--pool-mib") ||
                 !strcmp(key,"--operations") ||
-                !strcmp(key,"--full-passes")) {
+                !strcmp(key,"--full-passes") ||
+                !strcmp(key,"--hold-seconds")) {
             if(val[0]=='+' || val[0]=='-')return 2;
             char *end=NULL;errno=0;
             unsigned long x=strtoul(val,&end,10);
             if(errno || end==val || *end)return 2;
             if(!strcmp(key,"--pool-mib"))mib=(size_t)x;
             else if(!strcmp(key,"--full-passes"))full_passes=(size_t)x;
+            else if(!strcmp(key,"--hold-seconds"))hold_seconds=(size_t)x;
             else operations=(size_t)x;
         } else return 2;
     }
@@ -297,6 +397,10 @@ int main(int argc,char **argv) {
     if(!backend || geteuid()==0 || !no_gpu_swap_active() ||
        operations<16 || operations>MEASURE_MAX ||
        full_passes<1 || full_passes>4 ||
+       (hold_seconds && (backend==NOPEN_STORE_OPENCL
+          ?(mib!=4096 || hold_seconds<60 || hold_seconds>300 ||
+             strcmp(mode,"direct")!=0)
+          :(hold_seconds>3))) ||
        (backend==NOPEN_STORE_OPENCL
           ?(!required_ack || !ack || strcmp(ack,required_ack)!=0 ||
              (mib>=2048 && full_passes<2))
@@ -321,5 +425,5 @@ int main(int argc,char **argv) {
            " real_gpu=%s\n",backend_text,mode,mib,
            backend==NOPEN_STORE_OPENCL?"YES":"NO");
     fflush(stdout);
-    return run(backend,mib,mode,operations,full_passes);
+    return run(backend,mib,mode,operations,full_passes,hold_seconds);
 }
