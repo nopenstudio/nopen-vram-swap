@@ -63,7 +63,7 @@ int main(int argc,char **argv) {
             puts("Nopen VRAM-DIRECT: --backend mock|opencl"
                  " --capacity-mib 4|256|4096 --io-kib 4|64"
                  " --operations 100..10000 --worker /absolute/binary."
-                 " [--spread-across-vram]";
+                 " [--spread-across-vram]"
                  " NO SSD shadow, NO kernel SWAP, NO root.");
             return 0;
         }
