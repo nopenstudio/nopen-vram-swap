@@ -142,10 +142,14 @@ int main(int argc,char **argv) {
            " init_s=%.3f write_s=%.3f write_p50_us=%.2f"
            " write_p95_us=%.2f enqueued=%" PRIu64
            " dropped=%" PRIu64 " gpu_completed=%" PRIu64
+           " gpu_upload_avg_us=%.2f gpu_upload_max_us=%" PRIu64
            " kernel_swap=NO\n",
            backend==NOPEN_STORE_OPENCL?"opencl":"mock",mode,mib,
            ops,verified,init_s,write_s,lat[ops/2],lat[(ops*95)/100],
-           stats.async_enqueued,stats.async_dropped,stats.gpu_writes);
+           stats.async_enqueued,stats.async_dropped,stats.gpu_writes,
+           stats.gpu_writes?
+             (double)stats.async_gpu_upload_us_total/(double)stats.gpu_writes:0.0,
+           stats.async_gpu_upload_us_max);
     result=0;
 cleanup:
     nopen_shadow_close(shadow);
