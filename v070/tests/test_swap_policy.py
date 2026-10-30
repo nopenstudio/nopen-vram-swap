@@ -33,7 +33,7 @@ required=(
     'NOPEN_V080_4G_ACK',
     'V080_REAL_4G_GATE_PASS',
     'V080_REAL_4G_REFUSED',
-    'I_ACCEPT_4GIB_REAL_KERNEL_SWAP_CAN_LOCKUP',,
+    'I_ACCEPT_4GIB_REAL_KERNEL_SWAP_CAN_LOCKUP',
     'if [[ "$action" == start-pilot ]]',
     'if [[ "$capacity" != "64"',
     'NOPEN_V070_PILOT_ACK=I_ACCEPT_64MIB_KERNEL_GPU_SWAP_RISK',
