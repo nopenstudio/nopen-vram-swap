@@ -1,4 +1,4 @@
-name: v0.8 alpha.10 async durable 4GiB SWAP
+name: v0.8 alpha.10 GPU-only VRAM direct no SSD shadow
 on:
   push:
     branches: ["develop/v0.8.0-alpha.10"]
@@ -16,7 +16,7 @@ jobs:
           bash -n v070/tools/vram_swap_lab.sh
           bash -n v070/tools/build_ublk.sh
           bash -n v080/tools/test_alpha10_vram_direct.sh
-          bash -n v080/tools/compare_alpha10_ssd_gpu.sh
+          bash -n v080/tools/compare_alpha9_ssd_gpu.sh
           bash -n v080/tools/run_alpha6_async_gpu_diagnostics.sh
           python3 v070/tests/test_swap_policy.py v070/tools/vram_swap_lab.sh
           cmake -S v080 -B build-a10-mock -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
