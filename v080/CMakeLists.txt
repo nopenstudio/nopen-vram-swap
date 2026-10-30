@@ -27,6 +27,16 @@ add_test(NAME v080_zero_page_fastpath_preserves_acked_writes
          "${CMAKE_CURRENT_BINARY_DIR}")
 set_tests_properties(v080_zero_page_fastpath_preserves_acked_writes PROPERTIES
  PASS_REGULAR_EXPRESSION "V080_ZERO_FASTPATH_PASS" TIMEOUT 30)
+add_executable(nopen-v080-async-shadow-bench src/nopen_async_shadow_bench.c)
+target_link_libraries(nopen-v080-async-shadow-bench PRIVATE nopen_shadow)
+target_compile_options(nopen-v080-async-shadow-bench PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_test(NAME v080_alpha6_mock_async_benchmark_and_worker_loss
+ COMMAND nopen-v080-async-shadow-bench --backend mock --capacity-mib 4
+         --operations 750
+         --worker $<TARGET_FILE:nopen-isolated-worker>
+         --shadow-file "${CMAKE_CURRENT_BINARY_DIR}/v080-async-mock-shadow.bin")
+set_tests_properties(v080_alpha6_mock_async_benchmark_and_worker_loss PROPERTIES
+ PASS_REGULAR_EXPRESSION "V080_ASYNC_BENCH_PASS" TIMEOUT 45)
 add_executable(nopen-v080-gpu-bench src/nopen_gpu_bench.c)
 target_link_libraries(nopen-v080-gpu-bench PRIVATE nopen_vram_store)
 target_compile_options(nopen-v080-gpu-bench PRIVATE -Wall -Wextra -Wpedantic -Werror)
