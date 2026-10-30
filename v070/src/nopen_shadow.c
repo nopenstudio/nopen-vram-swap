@@ -14,6 +14,7 @@
 #include <sys/mman.h>
 #include <linux/fs.h>
 #include <unistd.h>
+#include <time.h>
 
 #ifndef O_DIRECT
 #define O_DIRECT 040000
@@ -70,6 +71,11 @@ static int all_gpu_valid(const nopen_shadow *s,size_t first,size_t pages) {
  * O_DSYNC write. Alpha.6 did so, and a 2.1s/2000-write hardware run
  * completed only 2 GPU uploads (34 queued) at 256MiB. A separate queue
  * mutex lets the GPU worker drain while the disk write is blocked. */
+static uint64_t clock_us(void) {
+    struct timespec t={0};
+    if(clock_gettime(CLOCK_MONOTONIC,&t)!=0)return 0;
+    return (uint64_t)t.tv_sec*1000000u+(uint64_t)t.tv_nsec/1000u;
+}
 static void *gpu_upload_worker(void *arg) {
     nopen_shadow *s=arg;
     pthread_mutex_lock(&s->upload_lock);
@@ -80,12 +86,17 @@ static void *gpu_upload_worker(void *arg) {
         gpu_upload_job *job=&s->upload_jobs[s->upload_head];
         s->gpu_busy=1;
         pthread_mutex_unlock(&s->upload_lock);
+        const uint64_t begun=clock_us();
         const int rc=nopen_isolated_write(s->gpu,job->offset,
                                           job->payload,job->length);
+        const uint64_t elapsed_us=clock_us()-begun;
         /* Publication of GPU validity uses the disk metadata mutex;
          * GPU payload is never used for swap-in until its version matches
          * the last ACKed SSD write. No GPU IPC while holding this lock. */
         pthread_mutex_lock(&s->lock);
+        s->stats.async_gpu_upload_us_total+=elapsed_us;
+        if(elapsed_us>s->stats.async_gpu_upload_us_max)
+            s->stats.async_gpu_upload_us_max=elapsed_us;
         if(rc!=0) {
             s->gpu_active=0;s->stats.gpu_active=0;s->stats.gpu_failures++;
             memset(s->gpu_valid_bits,0,(s->pages+7u)/8u);
