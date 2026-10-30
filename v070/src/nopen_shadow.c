@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <sys/statfs.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <linux/fs.h>
 #include <unistd.h>
 
@@ -269,6 +270,28 @@ int nopen_shadow_open(nopen_shadow **out,nopen_backend backend,
             errno=ENOMEM;goto open_error;
         }
         s->cv_initialized=1;
+        /* Kernel reclaim must not swap out the swap-server's own metadata.
+         * Only the privileged live-swap daemon uses this strict mlock gate.
+         * User-space mock / GPU-only tests stay unprivileged. This protects
+         * bookkeeping but does NOT guarantee GPU driver forward progress. */
+        if(geteuid()==0) {
+            if(mlock(s,sizeof(*s))!=0 ||
+               mlock(s->aligned,BLOCK)!=0 ||
+               mlock(s->checksums,s->pages*sizeof(*s->checksums))!=0 ||
+               mlock(s->written_bits,(s->pages+7u)/8u)!=0 ||
+               mlock(s->page_versions,
+                     s->pages*sizeof(*s->page_versions))!=0 ||
+               mlock(s->gpu_valid_bits,(s->pages+7u)/8u)!=0 ||
+               mlock(s->upload_jobs,
+                     GPU_QUEUE_SLOTS*sizeof(*s->upload_jobs))!=0) {
+                fprintf(stderr,"NOPEN_ASYNC_GPU_REFUSED reason=metadata_mlock"
+                               " errno=%d kernel_swap=NOT_YET\n",errno);
+                goto open_error;
+            }
+            fprintf(stderr,"NOPEN_ASYNC_GPU_MEMLOCK_PASS"
+                           " critical_metadata=LOCKED"
+                           " worker_driver_forward_progress=UNPROVEN\n");
+        }
         s->async_gpu=1;
         if(pthread_create(&s->uploader,NULL,gpu_upload_worker,s)!=0) {
             errno=EAGAIN;goto open_error;
