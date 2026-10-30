@@ -1,5 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
-/* v0.8 alpha.3: 1/2GiB AMD OpenCL transfer experiments, NO kernel swap.
+/* v0.8 alpha.4: 1/2/4GiB AMD OpenCL transfer experiments, NO kernel swap.
  * Two modes use the same nopen_store API: direct or explicitly pinned host.
  * 4MiB buffers; all pages verified with per-page identity tags and bounded host RAM.
  * Mock backend is only for CI validation, never evidence of GPU performance. */
@@ -288,23 +288,26 @@ int main(int argc,char **argv) {
        (strcmp(mode,"direct")!=0 && strcmp(mode,"pinned")!=0))return 2;
     const nopen_backend backend=!strcmp(backend_text,"opencl")
        ?NOPEN_STORE_OPENCL:!strcmp(backend_text,"mock")?NOPEN_STORE_MOCK:0;
-    /* 4GiB remains OFFLINE ONLY in alpha.3. A planner PASS is not
-     * authorization to allocate GPU memory or activate kernel SWAP. */
+    /* 4GiB only GPU-only, never kernel SWAP. A passing capacity
+     * planner cannot authorize any kernel swap experiment. */
     const char *required_ack=
         (mib==1024)?"I_ACCEPT_1GIB_GPU_ONLY_NO_SWAP":
-        (mib==2048)?"I_ACCEPT_2GIB_GPU_ONLY_NO_SWAP":NULL;
+        (mib==2048)?"I_ACCEPT_2GIB_GPU_ONLY_NO_SWAP":
+        (mib==4096)?"I_ACCEPT_4GIB_GPU_ONLY_NO_SWAP":NULL;
     if(!backend || geteuid()==0 || !no_gpu_swap_active() ||
        operations<16 || operations>MEASURE_MAX ||
        full_passes<1 || full_passes>4 ||
        (backend==NOPEN_STORE_OPENCL
           ?(!required_ack || !ack || strcmp(ack,required_ack)!=0 ||
-             (mib==2048 && full_passes<2))
+             (mib>=2048 && full_passes<2))
           :(mib<4 || mib>32))) {
         fputs("V080_GPU_BENCH_REFUSED safety guard: no root/ublk swap;"
               " OpenCL 1024MiB with --ack I_ACCEPT_1GIB_GPU_ONLY_NO_SWAP,"
               " or 2048MiB with --full-passes 2 and"
               " --ack I_ACCEPT_2GIB_GPU_ONLY_NO_SWAP;"
-              " mock 4..32MiB; 4096MiB NOT AUTHORIZED\n",stderr);
+              " or 4096MiB with --full-passes 2 and"
+              " --ack I_ACCEPT_4GIB_GPU_ONLY_NO_SWAP;"
+              " mock 4..32MiB; NO KERNEL SWAP\n",stderr);
         return 2;
     }
     if(backend==NOPEN_STORE_OPENCL &&
