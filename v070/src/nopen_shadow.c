@@ -378,8 +378,14 @@ int nopen_shadow_write(nopen_shadow *s,uint64_t off,const void *src,size_t len) 
      * the staging buffer and checksum-page snapshot. */
     pthread_mutex_unlock(&s->lock);
     memcpy(s->aligned,src,len);
+    const uint64_t ssd_begin=clock_us();
     const int io_rc=full_pwrite(s->fd,s->aligned,len,(off_t)off);
+    const uint64_t ssd_elapsed=clock_us()-ssd_begin;
     pthread_mutex_lock(&s->lock);
+    s->stats.ssd_write_us_total+=ssd_elapsed;
+    s->stats.ssd_write_samples++;
+    if(ssd_elapsed>s->stats.ssd_write_us_max)
+        s->stats.ssd_write_us_max=ssd_elapsed;
     if(io_rc!=0) {
         s->stats.disk_failures++;s->poisoned=1;s->stats.poisoned=1;
         pthread_mutex_unlock(&s->lock);
