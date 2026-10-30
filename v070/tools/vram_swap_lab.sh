@@ -15,6 +15,12 @@ shadowdir="$shadowbase"
 dev="/dev/ublkb23"
 id=23
 priority=200
+if [[ "$action" == start-4g ]]; then
+  # Alpha.5 used priority 200 and monopolized new swapouts ahead of zram.
+  # Alpha.6 uses equal priority to avoid a compulsory all-4GiB GPU path.
+  # This is still real kernel SWAP, not guaranteed to prevent stalls.
+  priority=100
+fi
 target="$build/nopen-v070-ublk"
 controller="$build/ublksrv-upstream/ublk"
 worker="$build/v060/nopen-isolated-worker"
@@ -37,6 +43,10 @@ if [[ "$action" == start-4g ]]; then
     exit 9
   fi
   echo "V080_REAL_4G_GATE_PASS capacity_mib=4096 real_kernel_swap=YES risk=HIGH"
+  echo "V080_ALPHA6_IO_POLICY concurrent_ssd_gpu_copy=ASYNC"
+  echo "V080_ALPHA6_IO_POLICY kernel_ack_after_durable_ssd=YES gpu_page_cache=BEST_EFFORT"
+  echo "V080_ALPHA6_IO_POLICY swap_priority=100 zram_preserved=YES"
+
 fi
 if [[ "$action" == status ]]; then
   echo "V070_STATUS device=$dev exists=$([[ -b "$dev" ]] && echo yes || echo no)"
@@ -231,6 +241,7 @@ if ! systemd-run --system --quiet --unit=nopen-v070-ublk \
     --property="StandardError=append:$logfile" \
     --setenv=NOPEN_V070_KERNEL_SWAP_TEST=EXPERIMENTAL_GPU_SWAP_CAN_HANG \
     --setenv=NOPEN_UBLK_BACKEND=opencl \
+    --setenv="NOPEN_SHADOW_ASYNC_GPU=$([[ "$action" == start-4g ]] && echo 1 || echo 0)" \
     --setenv="NOPEN_V070_CAPACITY_MIB=$capacity" \
     --setenv="NOPEN_UBLK_WORKER_BIN=$worker" \
     --setenv="NOPEN_UBLK_SHADOW_FILE=$shadowfile" \
