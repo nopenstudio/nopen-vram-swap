@@ -11,7 +11,8 @@ typedef struct {
     uint64_t writes, reads, gpu_reads, gpu_writes;
     uint64_t shadow_reads, zero_reads, gpu_failures, integrity_mismatches;
     uint64_t disk_failures, backed_bytes;
-    int gpu_active, poisoned;
+    uint64_t async_enqueued, async_dropped, async_disk_reads;
+    int gpu_active, poisoned, async_gpu_mode;
 } nopen_shadow_stats;
 
 /* Every acknowledged write first persists to a fully initialized, O_DIRECT |
