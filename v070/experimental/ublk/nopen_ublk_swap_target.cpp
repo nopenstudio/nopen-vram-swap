@@ -128,10 +128,39 @@ int open_target(ublksrv_dev* dev,int,int,char**) {
         return -EINVAL;
     }
     const char* shadow_path=getenv("NOPEN_UBLK_SHADOW_FILE");
-    if(physical_lab && (!shadow_path || shadow_path[0]!='/')) {
+    const char* storage=getenv("NOPEN_UBLK_STORAGE_MODE");
+    const bool vram_direct=storage && strcmp(storage,"vram-direct")==0;
+    if(storage && !vram_direct && strcmp(storage,"shadow")!=0) {
+        fprintf(stderr,"NOPEN_UBLK_REFUSED unknown storage mode\n");
+        delete state;
+        return -EINVAL;
+    }
+    /* GPU-only mode is an explicit SOURCE-CODE DATA PATH. It does not
+     * open SSD files or invoke Nopen shadow. Never silently downgrade a
+     * shadow-backed request to volatile VRAM if the shadow path is missing. */
+    if(vram_direct && shadow_path) {
+        fprintf(stderr,"NOPEN_UBLK_REFUSED vram-direct cannot have shadow path\n");
+        delete state;
+        return -EINVAL;
+    }
+    if(physical_lab && !vram_direct && (!shadow_path || shadow_path[0]!='/')) {
         fprintf(stderr,"NOPEN_V070_REFUSED independent durable GPU backup required\n");
         delete state;
         return -EINVAL;
+    }
+    if(physical_lab && vram_direct) {
+        const char* risk=getenv("NOPEN_VRAM_DIRECT_ACK");
+        if(!risk || strcmp(risk,"I_ACCEPT_VOLATILE_GPU_ONLY_SWAP_CAN_LOSE_PAGES_AND_LOCKUP")!=0) {
+            fprintf(stderr,"NOPEN_VRAM_DIRECT_REFUSED separate volatile GPU-only"
+                           " swap risk acknowledgment required\n");
+            delete state;
+            return -EPERM;
+        }
+        fprintf(stderr,"NOPEN_VRAM_DIRECT_PHYSICAL_LAB"
+                       " storage=GPU_VRAM_ONLY ssd_shadow=NO"
+                       " system_disks_untouched=YES"
+                       " gpu_reset_page_loss_risk=YES"
+                       " kernel_reclaim_forward_progress=UNPROVEN\n");
     }
     int rc=0;
     if(shadow_path) {
@@ -139,14 +168,16 @@ int open_target(ublksrv_dev* dev,int,int,char**) {
         if(!worker || worker[0]!='/')rc=-EINVAL;
         else rc=nopen_shadow_open(&state->shadow,backend,capacity_mib,
                                   2000,worker,shadow_path);
-    } else if(mode==NOPEN_RECOVERY_HOST_MIRROR) {
+    } else if(mode==NOPEN_RECOVERY_HOST_MIRROR && !vram_direct) {
         // Explicitly expensive CPU fallback lab only: no RAM savings.
         rc=nopen_recovery_open_bounded(&state->backing,backend,
                                       capacity_mib,mode,budget);
     } else {
-        // Default: GPU OpenCL commands run in a separate EXEC-isolated
-        // process. Each kernel block request has a bounded user-space
-        // response deadline. The worker's path is explicit and absolute.
+        // Direct VRAM: no SSD shadow / NVMe read or write, only GPU IPC.
+        // The isolated worker owns GPU page checksums and zero-page metadata.
+        // Each successful kernel WRITE ACK means the GPU write completed.
+        // On GPU/worker failure I/O fails closed; no recovery is promised.
+        // This does NOT imply safe forward progress under kernel reclaim.
         const char* worker=getenv("NOPEN_UBLK_WORKER_BIN");
         if(!worker || worker[0]!='/')rc=-EINVAL;
         else rc=nopen_isolated_open(&state->isolated,backend,capacity_mib,
