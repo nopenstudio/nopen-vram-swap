@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "nopen_shadow.h"
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,14 +11,14 @@
 #define CHECK(x) do { if(!(x)) { fprintf(stderr,"V080_CONCURRENT_IO_FAIL line=%d\n",__LINE__); return 2; } } while(0)
 typedef struct {
     nopen_shadow *s;
-    int failed;
+    atomic_int failed;
 } context;
 static void *writer(void *arg) {
     context *c=arg;
     unsigned char page[PAGE];
     for(unsigned i=0;i<500;i++) {
         memset(page,(unsigned char)(i+1),PAGE);
-        if(nopen_shadow_write(c->s,0,page,PAGE)!=0){c->failed=1;break;}
+        if(nopen_shadow_write(c->s,0,page,PAGE)!=0){atomic_store(&c->failed,1);break;}
     }
     return NULL;
 }
@@ -25,9 +26,9 @@ static void *reader(void *arg) {
     context *c=arg;
     unsigned char page[PAGE];
     for(unsigned i=0;i<600;i++) {
-        if(nopen_shadow_read(c->s,0,page,PAGE)!=0){c->failed=1;break;}
+        if(nopen_shadow_read(c->s,0,page,PAGE)!=0){atomic_store(&c->failed,1);break;}
         for(size_t j=1;j<PAGE;j++)if(page[j]!=page[0]){
-            c->failed=1;return NULL;
+            atomic_store(&c->failed,1);return NULL;
         }
     }
     return NULL;
@@ -49,7 +50,7 @@ int main(int argc,char **argv) {
     CHECK(pthread_create(&r,NULL,reader,&state)==0);
     CHECK(pthread_join(w,NULL)==0);
     CHECK(pthread_join(r,NULL)==0);
-    CHECK(state.failed==0);
+    CHECK(atomic_load(&state.failed)==0);
     CHECK(nopen_shadow_simulate_gpu_loss(s)==0);
     unsigned char page[PAGE];
     CHECK(nopen_shadow_read(s,0,page,PAGE)==0);
