@@ -16,6 +16,13 @@ add_test(NAME v070_durable_disk_shadow_survives_gpu_worker_timeout
   COMMAND nopen-test-shadow $<TARGET_FILE:nopen-isolated-worker> "${CMAKE_CURRENT_BINARY_DIR}")
 set_tests_properties(v070_durable_disk_shadow_survives_gpu_worker_timeout
   PROPERTIES PASS_REGULAR_EXPRESSION "V070_SHADOW_TEST_PASS" TIMEOUT 30)
+add_executable(nopen-test-shadow-async tests/test_shadow_async.c)
+target_link_libraries(nopen-test-shadow-async PRIVATE nopen_shadow)
+target_compile_options(nopen-test-shadow-async PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_test(NAME v080_alpha6_async_GPU_copy_does_not_block_swap_ack
+  COMMAND nopen-test-shadow-async $<TARGET_FILE:nopen-isolated-worker> "${CMAKE_CURRENT_BINARY_DIR}")
+set_tests_properties(v080_alpha6_async_GPU_copy_does_not_block_swap_ack
+  PROPERTIES PASS_REGULAR_EXPRESSION "V080_ASYNC_SHADOW_PASS" TIMEOUT 45)
 add_executable(nopen-shadow-smoke src/nopen_shadow_smoke.c)
 target_link_libraries(nopen-shadow-smoke PRIVATE nopen_shadow)
 target_compile_options(nopen-shadow-smoke PRIVATE -Wall -Wextra -Wpedantic -Werror)
