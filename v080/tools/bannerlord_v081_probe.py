@@ -144,15 +144,31 @@ def main() -> int:
                        "--io-kib", str(kib), "--operations", "2000",
                        "--spread-across-vram", "--worker", str(worker)]
                 started = time.monotonic()
-                try:
-                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
-                except subprocess.TimeoutExpired:
-                    raise RuntimeError(f"GPU worker benchmark timed out io_kib={kib}")
-                output = result.stdout + "\n" + result.stderr
+                peak_vram_mib = gpu["used_mib"]
+                min_mem_available_mib = mem_available_mib()
+                with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                      text=True) as process:
+                    while process.poll() is None:
+                        if time.monotonic() - started > 45:
+                            process.kill()
+                            process.communicate()
+                            raise RuntimeError(f"GPU worker benchmark timed out io_kib={kib}")
+                        # These samples cover the GPU worker's LIFETIME,
+                        # unlike only checking VRAM before and after it exits.
+                        try:
+                            peak_vram_mib = max(peak_vram_mib, amd_gpu_vram()["used_mib"])
+                            min_mem_available_mib = min(min_mem_available_mib,
+                                                        mem_available_mib())
+                        except (OSError, ValueError):
+                            pass
+                        time.sleep(0.05)
+                    stdout, stderr = process.communicate()
+                    returncode = process.returncode
+                output = stdout + "\n" + stderr
                 (out / f"block-{kib}k-trial-{trial}.log").write_text(output)
-                if result.returncode != 0:
+                if returncode != 0:
                     raise RuntimeError(f"GPU integrity failure io_kib={kib} trial={trial}"
-                                       f" rc={result.returncode}; see report logs")
+                                       f" rc={returncode}; see report logs")
                 passing = re.findall(r"NOPEN_VRAM_DIRECT_PASS[^\n]*", output)
                 if len(passing) != 1:
                     raise RuntimeError("GPU benchmark did not issue exactly one PASS line")
@@ -165,13 +181,16 @@ def main() -> int:
                 records.append({"io_kib": kib, "trial": trial,
                                 "gpu_before": gpu, "gpu_after": amd_gpu_vram(),
                                 "game_rss_mib": after_game["rss_mib"] if after_game else None,
+                                "gpu_peak_used_mib": peak_vram_mib,
+                                "os_min_mem_available_mib": min_mem_available_mib,
                                 "wall_s": round(time.monotonic()-started, 3),
                                 "results": fields})
                 print(f"V081_TRIAL_PASS io_kib={kib} trial={trial}"
                       f" write_p50_us={fields.get('write_p50_us')}"
                       f" write_p95_us={fields.get('write_p95_us')}"
                       f" read_p95_us={fields.get('read_p95_us')}"
-                      f" segment_edges={fields['segment_edge_checks']}", flush=True)
+                      f" segment_edges={fields['segment_edge_checks']}"
+                      f" gpu_peak_used_mib={peak_vram_mib}", flush=True)
         report = {"schema": "NOPEN_V081_BANNERLORD_GPU_COEXIST",
                   "status": "PASS", "mode": args.mode, "capacity_mib": args.capacity_mib,
                   "game_before": game, "gpu_before": before,
