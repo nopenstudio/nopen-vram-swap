@@ -37,6 +37,13 @@ add_test(NAME v080_alpha6_mock_async_benchmark_and_worker_loss
          --shadow-file "${CMAKE_CURRENT_BINARY_DIR}/v080-async-mock-shadow.bin")
 set_tests_properties(v080_alpha6_mock_async_benchmark_and_worker_loss PROPERTIES
  PASS_REGULAR_EXPRESSION "V080_ASYNC_BENCH_PASS" TIMEOUT 45)
+add_test(NAME v080_alpha9_disk_only_shadow_baseline_keeps_data
+ COMMAND nopen-v080-async-shadow-bench --backend mock --capacity-mib 4
+         --mode disk-only --operations 750
+         --worker $<TARGET_FILE:nopen-isolated-worker>
+         --shadow-file "${CMAKE_CURRENT_BINARY_DIR}/v080-alpha9-ssd-only-shadow.bin")
+set_tests_properties(v080_alpha9_disk_only_shadow_baseline_keeps_data
+ PROPERTIES PASS_REGULAR_EXPRESSION "V080_ASYNC_BENCH_PASS" TIMEOUT 45)
 add_executable(nopen-v080-gpu-bench src/nopen_gpu_bench.c)
 target_link_libraries(nopen-v080-gpu-bench PRIVATE nopen_vram_store)
 target_compile_options(nopen-v080-gpu-bench PRIVATE -Wall -Wextra -Wpedantic -Werror)
