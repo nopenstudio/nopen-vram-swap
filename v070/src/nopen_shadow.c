@@ -36,7 +36,9 @@ typedef struct {
 struct nopen_shadow {
     nopen_isolated_io *gpu;
     int fd;
-    pthread_mutex_t lock;
+    pthread_mutex_t lock; /* metadata + checksums; never held over SSD sync in async mode */
+    pthread_mutex_t disk_lock; /* serialize all disk reads/writes and staging buffer */
+    int disk_lock_initialized;
     unsigned char *aligned;
     uint64_t *checksums;
     unsigned char *written_bits; /* one bit/page, ~128KiB at 4GiB */
@@ -190,6 +192,11 @@ int nopen_shadow_open(nopen_shadow **out,nopen_backend backend,
         s->aligned=NULL;
     if(!s->checksums||!s->written_bits||!s->aligned)goto oom;
     if(pthread_mutex_init(&s->lock,NULL)!=0)goto oom;
+    if(pthread_mutex_init(&s->disk_lock,NULL)!=0) {
+        pthread_mutex_destroy(&s->lock);
+        goto oom;
+    }
+    s->disk_lock_initialized=1;
     s->fd=open(path,O_CREAT|O_EXCL|O_RDWR|O_DIRECT|O_DSYNC|O_CLOEXEC,0600);
     if(s->fd<0)goto open_error;
     struct statfs fs;
@@ -342,6 +349,7 @@ open_error:
      if(s->fd>=0){close(s->fd);unlink(path);}
      if(s->cv_initialized)pthread_cond_destroy(&s->upload_cv);
      if(s->upload_lock_initialized)pthread_mutex_destroy(&s->upload_lock);
+     if(s->disk_lock_initialized)pthread_mutex_destroy(&s->disk_lock);
      pthread_mutex_destroy(&s->lock);
      free(s->upload_jobs);free(s->page_versions);free(s->gpu_valid_bits);
      free(s->aligned);free(s->written_bits);free(s->checksums);free(s);
@@ -350,22 +358,37 @@ oom:
     free(s->aligned);free(s->written_bits);free(s->checksums);free(s);
     return -ENOMEM;
 }
+/* Lock ordering: disk_lock -> lock -> upload_lock.
+ * GPU worker never takes disk_lock and NEVER holds upload_lock while
+ * acquiring lock. The disk write can take milliseconds; the GPU worker
+ * can now publish its completion concurrently with that I/O.
+ * SSD always remains the authoritative page store. */
 int nopen_shadow_write(nopen_shadow *s,uint64_t off,const void *src,size_t len) {
     if(!src||!valid(s,off,len))return -EINVAL;
+    pthread_mutex_lock(&s->disk_lock);
     pthread_mutex_lock(&s->lock);
-    if(s->poisoned) {pthread_mutex_unlock(&s->lock);return -EIO;}
-    /* Persist FIRST; then GPU. A GPU timeout may only remove acceleration,
-     * never the authoritative data already written to independent storage. */
-    memcpy(s->aligned,src,len);
-    if(full_pwrite(s->fd,s->aligned,len,(off_t)off)!=0) {
-        s->stats.disk_failures++;s->poisoned=1;s->stats.poisoned=1;
+    if(s->poisoned) {
         pthread_mutex_unlock(&s->lock);
+        pthread_mutex_unlock(&s->disk_lock);
         return -EIO;
     }
-    size_t first=(size_t)(off/PAGE);
+    /* Release metadata lock BEFORE O_DSYNC: this was the remaining GPU
+     * queue starvation bug in alpha.7 (7/2000 uploads completed).
+     * disk_lock still blocks all competing readers/writers and retains
+     * the staging buffer and checksum-page snapshot. */
+    pthread_mutex_unlock(&s->lock);
+    memcpy(s->aligned,src,len);
+    const int io_rc=full_pwrite(s->fd,s->aligned,len,(off_t)off);
+    pthread_mutex_lock(&s->lock);
+    if(io_rc!=0) {
+        s->stats.disk_failures++;s->poisoned=1;s->stats.poisoned=1;
+        pthread_mutex_unlock(&s->lock);
+        pthread_mutex_unlock(&s->disk_lock);
+        return -EIO;
+    }
+    const size_t first=(size_t)(off/PAGE);
     for(size_t i=0;i<len/PAGE;i++) {
         s->checksums[first+i]=nopen_page_checksum(s->aligned+i*PAGE,PAGE);
-        /* Only set AFTER successful O_DSYNC authoritative write. */
         const size_t logical=first+i;
         s->written_bits[logical>>3] |=
             (unsigned char)(1u<<(logical&7u));
@@ -388,11 +411,7 @@ int nopen_shadow_write(nopen_shadow *s,uint64_t off,const void *src,size_t len) 
             s->upload_count++;
             s->stats.async_enqueued++;
             pthread_cond_signal(&s->upload_cv);
-        } else {
-            /* If GPU cannot keep up, preserve correctness and latency:
-             * only skip redundant cache upload, NEVER the disk write. */
-            s->stats.async_dropped++;
-        }
+        } else s->stats.async_dropped++;
         pthread_mutex_unlock(&s->upload_lock);
         if(s->stats.writes%8192u==0)
             fprintf(stderr,"NOPEN_ASYNC_SWAP_STATS writes=%llu"
@@ -405,8 +424,10 @@ int nopen_shadow_write(nopen_shadow *s,uint64_t off,const void *src,size_t len) 
                     (unsigned long long)s->stats.gpu_failures,
                     (unsigned long long)s->stats.disk_failures);
         pthread_mutex_unlock(&s->lock);
+        pthread_mutex_unlock(&s->disk_lock);
         return 0;
     }
+    /* Keep the older synchronous mode behavior for baseline comparison. */
     if(s->gpu_active) {
         if(nopen_isolated_write(s->gpu,off,src,len)!=0) {
             s->gpu_active=0;s->stats.gpu_active=0;s->stats.gpu_failures++;
@@ -416,25 +437,26 @@ int nopen_shadow_write(nopen_shadow *s,uint64_t off,const void *src,size_t len) 
         } else s->stats.gpu_writes++;
     }
     pthread_mutex_unlock(&s->lock);
+    pthread_mutex_unlock(&s->disk_lock);
     return 0;
 }
 int nopen_shadow_read(nopen_shadow *s,uint64_t off,void *dst,size_t len) {
     if(!dst||!valid(s,off,len))return -EINVAL;
+    pthread_mutex_lock(&s->disk_lock);
     pthread_mutex_lock(&s->lock);
-    if(s->poisoned){pthread_mutex_unlock(&s->lock);return -EIO;}
+    if(s->poisoned) {
+        pthread_mutex_unlock(&s->lock);
+        pthread_mutex_unlock(&s->disk_lock);
+        return -EIO;
+    }
     int gpu_ok=0;
     const size_t first=(size_t)(off/PAGE);
-    /* v0.8 alpha.1: a range with no acknowledged writes is logically all
-     * zero. Return the known value without GPU IPC, SSD page-in, or reclaim
-     * dependency. Do NOT infer this from checksums (hash collisions); a
-     * dedicated residency bit is set only after the disk write succeeds. */
     int never_written=1;
     for(size_t i=0;i<len/PAGE;i++) {
         const size_t logical=first+i;
         if(s->written_bits[logical>>3] &
            (unsigned char)(1u<<(logical&7u))) {
-            never_written=0;
-            break;
+            never_written=0;break;
         }
     }
     if(never_written) {
@@ -442,6 +464,7 @@ int nopen_shadow_read(nopen_shadow *s,uint64_t off,void *dst,size_t len) {
         s->stats.reads++;
         s->stats.zero_reads++;
         pthread_mutex_unlock(&s->lock);
+        pthread_mutex_unlock(&s->disk_lock);
         return 0;
     }
     int gpu_copy_consistent=!s->async_gpu;
@@ -456,8 +479,7 @@ int nopen_shadow_read(nopen_shadow *s,uint64_t off,void *dst,size_t len) {
         const int mismatch=gpu_rc==0 &&
                            check(s,s->aligned,first,len/PAGE)!=0;
         if(gpu_rc==0 && !mismatch) {
-            gpu_ok=1;
-            s->stats.gpu_reads++;
+            gpu_ok=1;s->stats.gpu_reads++;
         } else {
             s->gpu_active=0;s->stats.gpu_active=0;
             s->stats.gpu_failures++;
@@ -470,10 +492,15 @@ int nopen_shadow_read(nopen_shadow *s,uint64_t off,void *dst,size_t len) {
     }
     if(!gpu_ok) {
         if(s->async_gpu)s->stats.async_disk_reads++;
-        if(full_pread(s->fd,s->aligned,len,(off_t)off)!=0 ||
-           check(s,s->aligned,first,len/PAGE)!=0) {
+        /* Reads from SSD can also be slow. disk_lock pins the exact page
+         * contents/checksums while allowing GPU uploads to publish. */
+        pthread_mutex_unlock(&s->lock);
+        const int read_rc=full_pread(s->fd,s->aligned,len,(off_t)off);
+        pthread_mutex_lock(&s->lock);
+        if(read_rc!=0 || check(s,s->aligned,first,len/PAGE)!=0) {
             s->stats.disk_failures++;s->poisoned=1;s->stats.poisoned=1;
             pthread_mutex_unlock(&s->lock);
+            pthread_mutex_unlock(&s->disk_lock);
             return -EIO;
         }
         s->stats.shadow_reads++;
@@ -481,6 +508,7 @@ int nopen_shadow_read(nopen_shadow *s,uint64_t off,void *dst,size_t len) {
     memcpy(dst,s->aligned,len);
     s->stats.reads++;
     pthread_mutex_unlock(&s->lock);
+    pthread_mutex_unlock(&s->disk_lock);
     return 0;
 }
 int nopen_shadow_get_stats(nopen_shadow *s,nopen_shadow_stats *out) {
@@ -533,6 +561,7 @@ void nopen_shadow_close(nopen_shadow *s) {
     pthread_mutex_unlock(&s->lock);
     if(s->cv_initialized)pthread_cond_destroy(&s->upload_cv);
     if(s->upload_lock_initialized)pthread_mutex_destroy(&s->upload_lock);
+    if(s->disk_lock_initialized)pthread_mutex_destroy(&s->disk_lock);
     pthread_mutex_destroy(&s->lock);
     free(s->upload_jobs);free(s->page_versions);free(s->gpu_valid_bits);
     free(s->aligned);free(s->written_bits);free(s->checksums);free(s);
