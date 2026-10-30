@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Nopen v0.7 experimental LIVE GPU->Linux kernel swap. May HANG/reboot PC.
 # No installation, no autostart, no zram disable. Operates only /dev/ublkb23.
+# Alpha.5 adds an explicitly guarded real 4096MiB kernel-SWAP opt-in.
+# The 256MiB physical timeout blocker remains unresolved: unsafe on daily PC.
 set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 action="${1:-status}"
@@ -19,12 +21,23 @@ worker="$build/v060/nopen-isolated-worker"
 service="nopen-v070-ublk.service"
 usage() {
   echo "Usage: sudo bash v070/tools/vram_swap_lab.sh start-pilot 64 (explicit opt-in required)" >&2
+  echo "       sudo env NOPEN_V080_4G_ACK=I_ACCEPT_4GIB_REAL_KERNEL_SWAP_CAN_LOCKUP bash v070/tools/vram_swap_lab.sh start-4g 4096" >&2
   echo "       Legacy start {64|256|1024|2048|4096} remains BLOCKED" >&2
   echo "       sudo bash v070/tools/vram_swap_lab.sh stop" >&2
   echo "       bash v070/tools/vram_swap_lab.sh status" >&2
 }
 is_active() { swapon --noheadings --raw --show=NAME 2>/dev/null | grep -Fxq "$dev"; }
-case "$action" in start|start-pilot|stop|status) : ;; *) usage; exit 2 ;; esac
+case "$action" in start|start-pilot|start-4g|stop|status) : ;; *) usage; exit 2 ;; esac
+# Refuse wrong or missing per-capacity authorization BEFORE any privileged
+# operation. Even with authorization, physical GPU SWAP may lock up the host.
+if [[ "$action" == start-4g ]]; then
+  if [[ "$capacity" != "4096" ||
+        "$(printenv NOPEN_V080_4G_ACK || :)" != "I_ACCEPT_4GIB_REAL_KERNEL_SWAP_CAN_LOCKUP" ]]; then
+    echo "V080_REAL_4G_REFUSED exact 4096MiB + NOPEN_V080_4G_ACK required; 64MiB prior pilot does not authorize 4GiB" >&2
+    exit 9
+  fi
+  echo "V080_REAL_4G_GATE_PASS capacity_mib=4096 real_kernel_swap=YES risk=HIGH"
+fi
 if [[ "$action" == status ]]; then
   echo "V070_STATUS device=$dev exists=$([[ -b "$dev" ]] && echo yes || echo no)"
   swapon --show
@@ -95,9 +108,10 @@ if [[ "$action" == start ]]; then
   echo "Do not restart kernel SWAP until new implementation passes failure recovery gates." >&2
   exit 9
 fi
-# The only approved host kernel SWAP entrypoint is a deliberately tiny
-# 64MiB pilot, guarded by a second exact acknowledgement. Legacy start still
-# rejects all physical SWAP until Issue #7 has a final resolution.
+# The previously validated 64MiB physical pilot remains unchanged.
+# Alpha.5 4096MiB is a DISTINCT, highly risky live-host experiment, not a
+# certification of safe Linux reclaim or data durability under a GPU hang.
+# Legacy start remains BLOCKED pending Issue #7 resolution.
 if [[ "$action" == start-pilot ]]; then
   if [[ "$capacity" != "64" ||
         "$(printenv NOPEN_V070_PILOT_ACK || :)" != "I_ACCEPT_64MIB_KERNEL_GPU_SWAP_RISK" ]]; then
@@ -107,6 +121,16 @@ if [[ "$action" == start-pilot ]]; then
   echo "V070_PILOT_GATE_PASS max_capacity_mib=64 full_swap_release=NO"
 fi
 [[ "$capacity" =~ ^(64|256|1024|2048|4096)$ ]] || { usage; exit 2; }
+if [[ "$action" == start-4g ]]; then
+  # Require capacity policy to pass before creating devices or disk files.
+  python3 "$repo/v080/tools/capacity_plan.py" --stage-mib 4096 ||
+    { echo "V080_REAL_4G_REFUSED feasibility gate failed" >&2; exit 9; }
+  if ps -eo rss,comm --no-headers |
+     awk '$2=="Starter" && $1>524288{found=1}END{exit !found}'; then
+    echo "V080_REAL_4G_REFUSED close Bannerlord before engaging real kernel SWAP" >&2
+    exit 9
+  fi
+fi
 command -v systemd-run >/dev/null ||
   { echo "V070_REFUSED root system service manager unavailable" >&2; exit 2; }
 if systemctl is-active --quiet "$service"; then
@@ -125,10 +149,18 @@ if swapon --noheadings --raw --show=NAME | grep -Eq '^/dev/nbd'; then
 fi
 modprobe ublk_drv
 [[ -c /dev/ublk-control ]] || { echo "V070_REFUSED kernel has no ublk control device" >&2; exit 2; }
-if [[ "$(printenv NOPEN_V070_ACCEPT_RISK || :)" != "I_ACCEPT_GPU_SWAP_REBOOT" ]]; then
+if [[ "$action" == start-4g ||
+      "$(printenv NOPEN_V070_ACCEPT_RISK || :)" != "I_ACCEPT_GPU_SWAP_REBOOT" ]]; then
   echo "This is REAL Linux kernel SWAP backed by Radeon GPU/OpenCL."
   echo "It can deadlock Linux/AMDGPU, force a hard power cycle, or damage unsaved data."
-  echo "zram will stay enabled; Nopen gets priority $priority. Type 'EVET' to start."
+  if [[ "$action" == start-4g ]]; then
+    echo "4 GiB SWAP will be REAL and higher-priority than existing zram."
+    echo "The earlier physical 256 MiB WRITE timeout/host freeze is UNRESOLVED."
+    echo "SSD O_DIRECT/O_DSYNC shadow is mandatory and may make SWAP slower."
+    echo "Type 'EVET' only after backup, save, and test-host risk acceptance."
+  else
+    echo "zram will stay enabled; Nopen gets priority $priority. Type 'EVET' to start."
+  fi
   read -r approval </dev/tty || { echo "V070_REFUSED no terminal"; exit 2; }
   [[ "$approval" == EVET ]] || { echo "V070_REFUSED consent not received"; exit 2; }
 fi
