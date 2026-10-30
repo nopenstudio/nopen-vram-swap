@@ -18,6 +18,13 @@
 #define MIB ((size_t)1024u*1024u)
 #define KIB ((size_t)1024u)
 #define MAX_SLOTS 1024u
+#define SEGMENT_MIB 256u
+static size_t slot_index(size_t index,size_t count,size_t capacity,int spread) {
+    if(!spread)return index;
+    if(count<=1)return 0;
+    /* Monotone unique locations spanning first through last GPU page. */
+    return (index*(capacity-1u))/(count-1u);
+}
 
 static double now_us(void) {
     struct timespec t={0};
@@ -50,13 +57,18 @@ int main(int argc,char **argv) {
     const char *worker=NULL;
     nopen_backend backend=0;
     size_t mib=4,ops=2000,io_kib=4;
+    int spread=0;
     for(int i=1;i<argc;i++) {
         if(!strcmp(argv[i],"--help")) {
             puts("Nopen VRAM-DIRECT: --backend mock|opencl"
                  " --capacity-mib 4|256|4096 --io-kib 4|64"
                  " --operations 100..10000 --worker /absolute/binary."
+                 " [--spread-across-vram]";
                  " NO SSD shadow, NO kernel SWAP, NO root.");
             return 0;
+        }
+        if(!strcmp(argv[i],"--spread-across-vram")) {
+            spread=1;continue;
         }
         if(i+1>=argc)return 2;
         const char *key=argv[i++],*v=argv[i];
@@ -100,8 +112,10 @@ int main(int argc,char **argv) {
         goto end;
     printf("NOPEN_VRAM_DIRECT_START backend=%s capacity_mib=%zu"
            " io_kib=%zu operations=%zu shadow_file=NONE"
-           " disk_reads=0 disk_writes=0 kernel_swap=NO\n",
-           backend==NOPEN_STORE_OPENCL?"opencl":"mock",mib,io_kib,ops);
+           " disk_reads=0 disk_writes=0 kernel_swap=NO"
+           " spread_across_vram=%s\n",
+           backend==NOPEN_STORE_OPENCL?"opencl":"mock",mib,io_kib,ops,
+           spread?"YES":"NO");
     fflush(stdout);
     double init_begin=now_us();
     if(nopen_isolated_open(&gpu,backend,mib,2000,worker)!=0) {
@@ -112,7 +126,8 @@ int main(int argc,char **argv) {
     const double ops_begin=now_us();
     for(size_t i=0;i<ops;i++) {
         const size_t index=(i*131u+i/7u)%slots;
-        const uint64_t off=(uint64_t)index*(uint64_t)block;
+        const uint64_t off=(uint64_t)slot_index(index,slots,slots_capacity,spread)
+                            *(uint64_t)block;
         pattern(data,block,i,index);
         const double begun=now_us();
         if(nopen_isolated_write(gpu,off,data,block)!=0) {
@@ -136,7 +151,8 @@ int main(int argc,char **argv) {
     const double transfer_s=(now_us()-ops_begin)/1e6;
     size_t verified=0;
     for(size_t k=0;k<slots;k++) {
-        const uint64_t off=(uint64_t)k*(uint64_t)block;
+        const uint64_t off=(uint64_t)slot_index(k,slots,slots_capacity,spread)
+                            *(uint64_t)block;
         memset(got,0xA5,block);
         const double begun=now_us();
         if(nopen_isolated_read(gpu,off,got,block)!=0 ||
@@ -150,12 +166,50 @@ int main(int argc,char **argv) {
     /* A page OUTSIDE our written window must read zero. The worker's
      * per-page metadata enforces zero, not undefined raw GPU bytes. */
     if(slots<slots_capacity) {
-        const uint64_t off=(uint64_t)(slots_capacity-1u)*(uint64_t)block;
+        /* Find an actually UNWRITTEN block even in full-span mode. */
+        size_t untouched=0;
+        for(size_t probe=0;probe<slots_capacity;probe++) {
+            int seen=0;
+            for(size_t k=0;k<slots;k++)
+                if(slot_index(k,slots,slots_capacity,spread)==probe){
+                    seen=1;break;
+                }
+            if(!seen){untouched=probe;break;}
+        }
+        const uint64_t off=(uint64_t)untouched*(uint64_t)block;
         memset(got,0xA5,block);
         if(nopen_isolated_read(gpu,off,got,block)!=0)goto end;
         for(size_t k=0;k<block;k++)if(got[k]!=0) {
             fputs("NOPEN_VRAM_DIRECT_FAIL phase=unwritten_zero\n",stderr);
             goto end;
+        }
+    }
+    size_t edge_checks=0;
+    if(spread) {
+        /* 256MiB OpenCL segment boundaries, including last block in
+         * each segment and first block in the next. No SSD dependency. */
+        const size_t seg_blocks=(SEGMENT_MIB*MIB)/block;
+        for(size_t start=0;start<slots_capacity;start+=seg_blocks) {
+            const size_t offsets[3]={
+                start,
+                start+seg_blocks-1u<slots_capacity?
+                    start+seg_blocks-1u:slots_capacity-1u,
+                start+seg_blocks<slots_capacity?
+                    start+seg_blocks:slots_capacity-1u
+            };
+            for(size_t e=0;e<3;e++) {
+                const size_t page=offsets[e];
+                if(page>=slots_capacity)continue;
+                pattern(data,block,ops+edge_checks,page);
+                if(nopen_isolated_write(gpu,(uint64_t)page*block,data,block)!=0||
+                   nopen_isolated_read(gpu,(uint64_t)page*block,got,block)!=0||
+                   memcmp(data,got,block)!=0) {
+                    fprintf(stderr,"NOPEN_VRAM_DIRECT_FAIL phase=segment_edge"
+                                   " block=%zu\n",page);
+                    goto end;
+                }
+                edge_checks++;
+            }
         }
     }
     nopen_isolated_stats status={0};
@@ -171,12 +225,15 @@ int main(int argc,char **argv) {
            " read_p50_us=%.2f read_p95_us=%.2f"
            " effective_write_mib_s=%.2f"
            " shadow_file=NONE ssd_write_through=NO"
-           " GPU_ACK=YES kernel_swap=NO\n",
+           " GPU_ACK=YES kernel_swap=NO"
+           " spread_across_vram=%s segment_edge_checks=%zu"
+           " full_capacity_bytes_written=NO\n",
            backend==NOPEN_STORE_OPENCL?"opencl":"mock",mib,io_kib,
            ops,verified,init_s,transfer_s,
            write_latency[ops/2u],write_latency[(ops*95u)/100u],
            read_latency[reads/2u],read_latency[(reads*95u)/100u],
-           (double)(ops*block)/(double)MIB/transfer_s);
+           (double)(ops*block)/(double)MIB/transfer_s,
+           spread?"YES":"NO",edge_checks);
     result=0;
 end:
     nopen_isolated_close(gpu);
