@@ -12,6 +12,7 @@ typedef struct {
     uint64_t shadow_reads, zero_reads, gpu_failures, integrity_mismatches;
     uint64_t disk_failures, backed_bytes;
     uint64_t async_enqueued, async_dropped, async_disk_reads;
+    uint64_t async_gpu_upload_us_total, async_gpu_upload_us_max;
     int gpu_active, poisoned, async_gpu_mode;
 } nopen_shadow_stats;
 
