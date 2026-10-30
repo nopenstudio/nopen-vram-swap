@@ -15,7 +15,7 @@ jobs:
         run: |
           bash -n v070/tools/vram_swap_lab.sh
           bash -n v070/tools/build_ublk.sh
-          bash -n v080/tools/run_alpha7_async_gpu_diagnostics.sh
+          bash -n v080/tools/run_alpha6_async_gpu_diagnostics.sh
           python3 v070/tests/test_swap_policy.py v070/tools/vram_swap_lab.sh
           cmake -S v080 -B build-a7-mock -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
           cmake --build build-a7-mock --parallel
