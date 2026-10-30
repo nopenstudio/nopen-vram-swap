@@ -1,0 +1,38 @@
+name: v080 alpha4 4GiB offline validation
+on:
+  push:
+    branches: ["develop/v0.8.0-alpha.4"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mock-and-guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          cmake -S v080 -B build-a4 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-a4 --parallel
+          ctest --test-dir build-a4 --output-on-failure
+          bash -n v080/tools/run_alpha4_gpu.sh
+          bash -n v080/tools/run_alpha4_game_hold.sh
+  opencl-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y ocl-icd-opencl-dev opencl-headers
+      - run: |
+          cmake -S v080 -B build-a4-opencl -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+          cmake --build build-a4-opencl --parallel
+  offline-4gib:
+    needs: mock-and-guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          cmake -S v080 -B build-a4 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-a4 --parallel
+          ./build-a4/nopen-v080-scale \
+            "$GITHUB_WORKSPACE/build-a4/v070/v060/nopen-isolated-worker" \
+            "$RUNNER_TEMP/v080-alpha4-4gib-shadow.bin" 4096
