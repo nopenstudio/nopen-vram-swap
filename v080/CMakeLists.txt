@@ -44,6 +44,22 @@ add_test(NAME v080_alpha9_disk_only_shadow_baseline_keeps_data
          --shadow-file "${CMAKE_CURRENT_BINARY_DIR}/v080-alpha9-ssd-only-shadow.bin")
 set_tests_properties(v080_alpha9_disk_only_shadow_baseline_keeps_data
  PROPERTIES PASS_REGULAR_EXPRESSION "V080_ASYNC_BENCH_PASS" TIMEOUT 45)
+# GPU-only data path (no SSD shadow, no kernel swap activation).
+add_executable(nopen-v080-vram-direct-bench src/nopen_vram_direct_bench.c)
+target_link_libraries(nopen-v080-vram-direct-bench PRIVATE nopen_isolated_io)
+target_compile_options(nopen-v080-vram-direct-bench PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_test(NAME v080_alpha10_gpu_only_4k_page_integrity
+ COMMAND nopen-v080-vram-direct-bench --backend mock
+         --capacity-mib 4 --io-kib 4 --operations 500
+         --worker $<TARGET_FILE:nopen-isolated-worker>)
+set_tests_properties(v080_alpha10_gpu_only_4k_page_integrity
+ PROPERTIES PASS_REGULAR_EXPRESSION "NOPEN_VRAM_DIRECT_PASS" TIMEOUT 30)
+add_test(NAME v080_alpha10_gpu_only_64k_batch_integrity
+ COMMAND nopen-v080-vram-direct-bench --backend mock
+         --capacity-mib 4 --io-kib 64 --operations 250
+         --worker $<TARGET_FILE:nopen-isolated-worker>)
+set_tests_properties(v080_alpha10_gpu_only_64k_batch_integrity
+ PROPERTIES PASS_REGULAR_EXPRESSION "NOPEN_VRAM_DIRECT_PASS" TIMEOUT 30)
 add_executable(nopen-v080-gpu-bench src/nopen_gpu_bench.c)
 target_link_libraries(nopen-v080-gpu-bench PRIVATE nopen_vram_store)
 target_compile_options(nopen-v080-gpu-bench PRIVATE -Wall -Wextra -Wpedantic -Werror)
