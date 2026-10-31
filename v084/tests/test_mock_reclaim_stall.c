@@ -12,7 +12,7 @@
 #include <time.h>
 #define PAGE 4096u
 #define CHECK(x) do { if(!(x)) { \
-    fprintf(stderr,"V084_STALL_TEST_FAILED line=%d test=%s\\n",__LINE__,#x); \
+    fprintf(stderr,"V084_STALL_TEST_FAILED line=%d test=%s\n",__LINE__,#x); \
     return 1; \
 } } while(0)
 static uint64_t ticks(void) {
@@ -58,7 +58,7 @@ int main(int argc,char **argv) {
         nopen_isolated_close(ctx);
         printf("V084_STALLED_IO_PASS op=%s timeout=YES"
                " output_unchanged=YES worker_failed_closed=YES"
-               " elapsed_ms=%llu\\n",op,(unsigned long long)elapsed);
+               " elapsed_ms=%llu\n",op,(unsigned long long)elapsed);
     }
     puts("V084_MOCK_RECLAIM_STALL_PASS worker_alive_before_timeout=YES"
          " synthetic_wait=YES normal_read_write=YES"
