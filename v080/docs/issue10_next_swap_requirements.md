@@ -40,6 +40,23 @@ This runs **mock IPC** only. It includes an intentional failure of the **mock** 
 
 Only after Phase 1 passes, separately verify that the isolated GPU worker and Vulkan application coexist **without kernel SWAP**. Prefer short low-capacity tests, then 4 GiB allocation only after its preflight and independent pilot. Use the existing guarded user-space probes; do **not** run the `start` action of `v081_direct4g_kernel_lab.sh`.
 
+## Phase 2A | separate raw ublk transport, no SWAP (experimental)
+
+With both 256MiB and 4GiB GPU-only + Bannerlord coexistence already PASSED, the next unproven component is the **real kernel ublk block-request route**. There is now an independent diagnostic entrypoint, `v080/tools/issue10_ublk_raw_only.sh`, on the Issue #10 branch. It does NOT mount, format, `mkswap`, `swapon` or alter zram. It uses a distinct transient systemd unit, accepts **256MiB only**, and validates three 4KiB raw positions (start/middle/end of a newly created GPU-backed `/dev/ublkb23`).
+
+**Preparation, read-only, non-root:**
+
+```sh
+bash v080/tools/issue10_ublk_raw_only.sh preflight 256
+python3 v080/tests/test_issue10_raw_only_launcher.py
+```
+
+The **real** pilot creates a privileged ublk block device and executes real GPU I/O. Unlike the two commands above, this can still hang the GPU or kernel even without SWAP. It **must not** be treated as a normal game benchmark or as safe on a daily desktop: first ensure verified backups, unsaved work closed, an independent recovery/observer plan and explicit user risk acceptance. The command is intentionally documented in the script's usage output rather than provided as a default stage. Do not run it with Bannerlord open. Running in a disposable/recoverable machine with a suitable AMD GPU is preferable.
+
+**Evidence required:** `ISSUE10_RAW_PAGE_PASS` for all three offsets; `NOPEN_DIAG_UBLK BEGIN/END`, `NOPEN_DIAG_IPC BEGIN/END`, `NOPEN_DIAG_WORKER GPU_ENTER/GPU_RETURN`; successful device removal and service stop. If any step fails or cleanup is incomplete, inspect logs rather than running again.
+
+**Important:** This probes I/O dispatch through ublk but still does not test Linux swap reclaim, swap-in / swap-out, GPU page preservation after reset, or safety of future real 4GiB swap.
+
 ## Phase 3 | real SWAP gate remains CLOSED
 
 Before a future physical SWAP experiment, arrange an out-of-band observer (e.g., a separate machine collecting system logs), validate telemetry and recovery, capture a stable baseline, and perform the first live kernel swap in a disposable/recoverable environment rather than on the daily desktop. The current real-swap launcher is **not** an authorized next step.
