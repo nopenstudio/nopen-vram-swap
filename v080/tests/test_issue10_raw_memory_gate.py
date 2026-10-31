@@ -51,7 +51,9 @@ with tempfile.TemporaryDirectory(prefix="nopen-issue10-gate-") as td:
     meminfo.write_text("MemAvailable: 5000000 kB\n")
     swaps.write_text("Filename Type Size Used Priority\n"
                      "/dev/zram0 partition 7500000 0 100\n")
-    game_present = fake.replace("if false;then", "if true;then")
+    game_present = fake.replace("if false >/dev/null 2>&1;then",
+                                "if true >/dev/null 2>&1;then")
+    assert game_present != fake, "mock game process condition not replaced"
     p = subprocess.run(["bash", "-c", game_present + "\nraw_memory_gate"],
                        capture_output=True, text=True, timeout=3, check=False)
     assert p.returncode == 2, "active Bannerlord must block raw ublk test"
