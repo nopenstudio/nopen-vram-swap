@@ -66,8 +66,14 @@ int main(int argc,char **argv) {
     }
     unsigned char *buffer=malloc(NOPEN_BLK_MAX_BYTES);
     if(!buffer){nopen_blk_close(b);return 4;}
-    if(mlock(buffer,NOPEN_BLK_MAX_BYTES)!=0)
+    if(mlock(buffer,NOPEN_BLK_MAX_BYTES)!=0) {
+        const char *direct=getenv("NOPEN_VRAM_DIRECT_PREFILL");
+        if(geteuid()==0 && direct && strcmp(direct,"1")==0) {
+            fprintf(stderr,"NOPEN_DIRECT_WORKER_MLOCK_REFUSED errno=%d\n",errno);
+            free(buffer);nopen_blk_close(b);return 4;
+        }
         fputs("NOPEN_V070_WARNING worker staging not mlocked; reclaim risk remains\n",stderr);
+    }
     for(;;) {
         if(recv_all(fd,&msg,sizeof(msg))!=0)break;
         if(msg.magic!=NOPEN_IPC_MAGIC || msg.bytes>NOPEN_BLK_MAX_BYTES ||
