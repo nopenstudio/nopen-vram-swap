@@ -1,0 +1,30 @@
+name: "v0.8.4 reclaim-cycle mock modeling (never kernel SWAP)"
+
+on:
+  push:
+    branches:
+      - develop/v0.8.4
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reclaim-cycle-mock-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure completely mock-only builds
+        run: cmake -S v084 -B build-v084-mock -DCMAKE_BUILD_TYPE=Debug -DNOPEN_OPENCL=OFF
+      - name: Compile
+        run: cmake --build build-v084-mock --parallel 2
+      - name: Model hypothetical reclaim cycle and mock stalled READ/WRITE I/O
+        run: ctest --test-dir build-v084-mock -R '^v084_' --output-on-failure
+      - name: Preserve preceding v0.8.3 fault matrix
+        run: ctest --test-dir build-v084-mock -R '^v083_' --output-on-failure
+      - name: Static safety contract
+        run: |
+          python3 v084/tests/test_mock_policy.py
+          python3 v084/tools/reclaim_cycle.py --scenario both
+          echo V084_MOCK_CI_PASS gpu_context=NO kernel_device=NO kernel_swap=NO physical_reclaim=UNPROVEN
