@@ -77,7 +77,7 @@ with TemporaryDirectory() as tmp:
     assert explicit["status"] == "USERSPACE_EXPERIMENT_ELIGIBLE"
     assert "HEADROOM_BELOW_V085_POLICY_MINIMUM" in mod.evaluate(
         p,m,s,min_free_mib=1024)["reasons"]
-    assert "UNSUPPORTED_POOL_SIZE" in mod.evaluate(p,m,s,pool_mib=320)["reasons"]
+    assert "UNSUPPORTED_POOL_SIZE" in mod.evaluate(p,m,s,pool_mib=320,pci="0000:03:00.0")["reasons"]
     (p / "0000:03:00.0" / "mem_info_vram_used").unlink()
     assert "VRAM_PROBE_FAILED" in mod.evaluate(p,m,s,pci="0000:03:00.0")["reasons"]
 
