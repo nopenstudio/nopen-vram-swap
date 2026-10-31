@@ -234,8 +234,10 @@ int on_io(const ublksrv_queue* q,const ublk_io_data* io) {
     uint64_t offset=static_cast<uint64_t>(iod->start_sector)*512u;
     size_t bytes=static_cast<size_t>(iod->nr_sectors)*512u;
     void* buf=ublksrv_queue_get_io_buf(q,io->tag);
-    const uint64_t started=diag_ms();
-    diag_ublk("BEGIN",op,offset,bytes,0,started);
+    const char* trace=getenv("NOPEN_DIAG_IO_TRACE");
+    const bool tracing=trace && strcmp(trace,"1")==0;
+    const uint64_t started=tracing?diag_ms():0;
+    if(tracing)diag_ublk("BEGIN",op,offset,bytes,0,started);
     int rc=-EOPNOTSUPP;
     /* OpenCL writes are synchronous and complete when acknowledged.
      * FLUSH does not promise persistence across GPU resets/reboots; it only
@@ -259,7 +261,7 @@ int on_io(const ublksrv_queue* q,const ublk_io_data* io) {
         }
     }
     // A checked successful completion returns number of transferred bytes.
-    diag_ublk(rc==0?"END":"FAIL",op,offset,bytes,rc,started);
+    if(tracing)diag_ublk(rc==0?"END":"FAIL",op,offset,bytes,rc,started);
     ublksrv_complete_io(q,io->tag,rc==0?static_cast<int>(bytes):rc);
     return 0;
 }
