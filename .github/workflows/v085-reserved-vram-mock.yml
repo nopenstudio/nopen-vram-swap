@@ -1,0 +1,31 @@
+name: "v0.8.5 Reserved VRAM feasibility (read-only; no kernel SWAP)"
+
+on:
+  push:
+    branches:
+      - develop/v0.8.5
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reserved-vram-mock-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure with OpenCL OFF (no real VRAM allocation)
+        run: cmake -S v085 -B build-v085-mock -DCMAKE_BUILD_TYPE=Debug -DNOPEN_OPENCL=OFF
+      - name: Compile inherited mock targets
+        run: cmake --build build-v085-mock --parallel 2
+      - name: Test hypothetical boot reservation budgets and monitoring
+        run: ctest --test-dir build-v085-mock -R '^v085_' --output-on-failure
+      - name: Preserve v084 synthetic reclaim-stall tests
+        run: ctest --test-dir build-v085-mock -R '^v084_' --output-on-failure
+      - name: Preserve v083 fault matrix
+        run: ctest --test-dir build-v085-mock -R '^v083_' --output-on-failure
+      - name: No swap/pinning claims in read-only preflight
+        run: |
+          python3 v085/tests/test_v085_safety_contract.py
+          echo V085_RESERVED_CI_PASS device_capacity_unchanged=YES gpu_pin=UNPROVEN kernel_swap=BLOCKED
