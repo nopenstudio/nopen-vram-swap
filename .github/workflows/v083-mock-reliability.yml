@@ -1,0 +1,27 @@
+name: "v0.8.3 mock worker reliability (no kernel SWAP)"
+on:
+  push:
+    branches:
+      - develop/v0.8.3
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  mock-worker-fault-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure mock backend ONLY (no OpenCL GPU device)
+        run: cmake -S v083 -B build-v083-mock -DCMAKE_BUILD_TYPE=Debug -DNOPEN_OPENCL=OFF
+      - name: Compile fault injection executable and isolated worker
+        run: cmake --build build-v083-mock --parallel 2
+      - name: Test timeout, abrupt worker death and malformed IPC fail-closed
+        run: ctest --test-dir build-v083-mock -R '^v083_' --output-on-failure
+      - name: Preserve v060 issue10 mock regression
+        run: ctest --test-dir build-v083-mock -R 'v060_issue10_trace_mock_only' --output-on-failure
+      - name: Guard mock-only injection and no host SWAP activation
+        run: |
+          python3 v083/tests/test_fault_policy.py
+          echo V083_MOCK_RELIABILITY_CI_PASS gpu_context=NO ublk_device=NO kernel_swap=NO zram=UNTOUCHED
