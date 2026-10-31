@@ -279,6 +279,38 @@ int nopen_isolated_inject_hang(nopen_isolated_io *r) {
     pthread_mutex_unlock(&r->lock);
     return rc;
 }
+/* v0.8.3: deliberately break ONLY mock IPC. No GPU access, no kernel
+ * devices, no swap management. Every path terminates the isolated worker and
+ * marks the context irrecoverably failed, including an accidentally well-
+ * formed response. The read destination remains unmodified after failure. */
+static int inject_mock_fault(nopen_isolated_io *r,uint32_t opcode,
+                             const char *stage) {
+    if(!r)return -EINVAL;
+    pthread_mutex_lock(&r->lock);
+    if(r->backend!=NOPEN_STORE_MOCK || !r->alive) {
+        pthread_mutex_unlock(&r->lock);
+        return -EPERM;
+    }
+    uint64_t deadline=monotonic_ms()+r->timeout_ms;
+    nopen_ipc_msg req={NOPEN_IPC_MAGIC,opcode,0,0,0,0};
+    nopen_ipc_msg response={0};
+    int rc=send_exact(r->fd,&req,sizeof req,deadline);
+    if(!rc)rc=recv_exact(r->fd,&response,sizeof response,deadline);
+    if(!rc) {
+        /* A malformed response is a protocol violation, not an I/O success.
+         * A surprising correct response from a fault is also fatal. */
+        rc=response.magic!=NOPEN_IPC_MAGIC?-EBADMSG:-EIO;
+    }
+    rc=fail_io(r,rc,opcode,0,0,stage);
+    pthread_mutex_unlock(&r->lock);
+    return rc;
+}
+int nopen_isolated_inject_crash(nopen_isolated_io *r) {
+    return inject_mock_fault(r,NOPEN_IPC_EXIT_TEST_ONLY,"test_crash");
+}
+int nopen_isolated_inject_bad_reply(nopen_isolated_io *r) {
+    return inject_mock_fault(r,NOPEN_IPC_BAD_REPLY_TEST_ONLY,"test_bad_reply");
+}
 void nopen_isolated_close(nopen_isolated_io *r) {
     if(!r)return;
     pthread_mutex_lock(&r->lock);
