@@ -241,8 +241,9 @@ static int transfer(nopen_isolated_io *r,uint32_t op,uint64_t off,
         if(!rc)memcpy(dest,r->staging,bytes);
     }
     /* Log before fail_io terminates the worker, or completion returns. */
-    diag_ipc(r,rc?"FAIL":"END",op,off,bytes,
-             rc?stage:"complete",rc,monotonic_ms()-begin_ms);
+    if(diag_trace_enabled())
+        diag_ipc(r,rc?"FAIL":"END",op,off,bytes,
+                 rc?stage:"complete",rc,monotonic_ms()-begin_ms);
     if(rc)rc=fail_io(r,rc,op,off,bytes,stage);
     else r->stats.operations++;
     pthread_mutex_unlock(&r->lock);
