@@ -28,7 +28,9 @@ case "$action" in
     if (( EUID!=0 ));then
       echo "V081_DIRECT4G_REFUSED stop needs sudo";exit 2
     fi
-    exec bash "$repo/v070/tools/vram_swap_lab.sh" stop;;
+    bash "$repo/v070/tools/vram_swap_lab.sh" stop
+    rm -f "$state/storage-mode"
+    exit 0;;
   preflight)
     python3 "$repo/v080/tools/v081_direct4g_preflight.py"
     echo "V081_DIRECT4G_PREFLIGHT_NOTE physical host swapon NOT authorized by this check"
@@ -95,7 +97,11 @@ rollback_if_inactive() {
   systemctl stop "$service" >/dev/null 2>&1 || true
   rm -f "$state/device" "$state/capacity" "$state/storage-mode"
 }
-trap 'rollback_if_inactive' ERR
+on_exit() {
+  local rc=$?
+  if (( rc!=0 ));then rollback_if_inactive;fi
+}
+trap on_exit EXIT
 echo "V081_DIRECT4G_START storage=VRAM_ONLY ssd_shadow=NO zram=UNCHANGED"
 systemd-run --system --quiet --unit=nopen-v070-ublk \
   --service-type=exec --collect \
@@ -130,7 +136,13 @@ if (( ! ready ));then
 fi
 for stamp in NOPEN_VRAM_DIRECT_PHYSICAL_LAB NOPEN_VRAM_DIRECT_PREFILL_PASS \
   NOPEN_DIRECT_METADATA_MLOCK_PASS NOPEN_DIRECT_WORKER_STAGING_MLOCK_PASS;do
-  if ! grep -Fq "$stamp" "$logfile";then
+  stamp_ready=0
+  for (( attempt=0;attempt<50;attempt++ ));do
+    if grep -Fq "$stamp" "$logfile";then stamp_ready=1;break;fi
+    if ! systemctl is-active --quiet "$service";then break;fi
+    sleep 0.1
+  done
+  if (( ! stamp_ready ));then
     echo "V081_DIRECT4G_REFUSED missing before-swap safety log: $stamp" >&2
     tail -n 80 "$logfile" >&2
     exit 5
@@ -150,7 +162,7 @@ if ! is_active;then
   echo "V081_DIRECT4G_FAILED kernel swap activation unconfirmed" >&2
   exit 6
 fi
-trap - ERR
+trap - EXIT
 swapon --show | tee "$state/swapon-active.txt"
 echo "V081_DIRECT4G_REAL_SWAP_ACTIVE device=$dev capacity_mib=4096 priority=$priority"
 echo "V081_DIRECT4G_BACKING GPU_VRAM_ONLY=YES SSD_SHADOW=NO ZRAM_PRESERVED=YES"
