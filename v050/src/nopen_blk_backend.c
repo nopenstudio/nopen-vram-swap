@@ -8,6 +8,8 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 /* This code is a bounded transport backend, not a kernel-side reclaim hook.
  * Only the registered context owns mutable state. Single DMA command at a
@@ -58,6 +60,22 @@ int nopen_blk_open(nopen_blk_backend **out,nopen_backend backend,size_t mib) {
         pthread_mutex_destroy(&b->lock);
         free(b->staging);free(b->meta);free(b);
         return -EIO;
+    }
+    /* Only on physical direct-VRAM kernel-SWAP experiment: metadata
+     * belongs in non-reclaimable system RAM. 4GiB SWAP has about 16MiB
+     * of this table; failure must block swapon before any Linux page
+     * depends on it. Does not mlock OpenCL's internal runtime heaps. */
+    const char *prefill=getenv("NOPEN_VRAM_DIRECT_PREFILL");
+    if(geteuid()==0 && prefill && strcmp(prefill,"1")==0) {
+        if(mlock(b->meta,b->pages*sizeof(*b->meta))!=0 ||
+           mlock(b->staging,NOPEN_BLK_MAX_BYTES)!=0) {
+            fprintf(stderr,"NOPEN_DIRECT_METADATA_MLOCK_REFUSED errno=%d\\n",errno);
+            nopen_store_close(b->store);
+            pthread_mutex_destroy(&b->lock);
+            free(b->staging);free(b->meta);free(b);
+            return -ENOMEM;
+        }
+        fprintf(stderr,"NOPEN_DIRECT_METADATA_MLOCK_PASS pages=%zu\\n",b->pages);
     }
     b->last_error="ok";
     *out=b;
