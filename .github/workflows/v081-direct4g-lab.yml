@@ -20,6 +20,7 @@ jobs:
           bash -n v070/tools/vram_swap_lab.sh
           bash -n v080/tools/v081_direct4g_kernel_lab.sh
           python3 -m py_compile v080/tools/v081_direct4g_preflight.py
+          python3 -m py_compile v080/tools/v081_direct4g_telemetry.py
           python3 v080/tests/test_v081_direct4g_launcher.py
       - name: Build and test GPU-only 4KiB and 64KiB page integrity
         run: |
