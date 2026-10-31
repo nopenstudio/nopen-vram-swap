@@ -25,6 +25,8 @@ jobs:
         run: |
           bash -n v080/tools/run_v081_bannerlord.sh
           python3 v080/tests/test_v081_runner_game_gate.py
+          python3 v080/tests/test_v081_bannerlord_probe.py
+          python3 v070/tests/test_game_pid.py
       - name: Validate read-only audit and fsynced telemetry file
         run: |
           python3 -m py_compile v080/tools/issue10_next_swap_readiness.py
