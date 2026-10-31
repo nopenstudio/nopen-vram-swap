@@ -1,20 +1,39 @@
-name: CMake Linux Vulkan build
+name: "Nopen current mock suite + archived Vulkan probe"
+
 on:
   push:
-    branches: [main, 'develop/**']
+    branches: [main, 'develop/**', 'refactor/**']
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
-  linux:
+  current-mock:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Install Vulkan development headers and loader
-        run: sudo apt-get update && sudo apt-get install -y libvulkan-dev
-      - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-      - name: Build
-        run: cmake --build build --parallel
-      - name: Vulkan-only static safety contract
+      - name: Configure root default safe build
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DNOPEN_OPENCL=OFF
+      - name: Build (no GPU or block devices)
+        run: cmake --build build --parallel 2
+      - name: Run current and inherited safety checks
+        run: ctest --test-dir build -R '^(v083_|v084_|v085_|repository_)' --output-on-failure
+      - name: Check standalone Vulkan archival contract
         run: python3 tests/static_contract.py
-      - name: Unit-level smoke test (no GPU required)
-        run: ctest --test-dir build --output-on-failure
+
+  archived-vulkan-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Vulkan SDK headers
+        run: sudo apt-get update && sudo apt-get install -y libvulkan-dev
+      - name: Configure optional legacy Vulkan target
+        run: cmake -S . -B build-vulkan -DCMAKE_BUILD_TYPE=Debug -DNOPEN_OPENCL=OFF -DNOPEN_BUILD_LEGACY_VULKAN=ON
+      - name: Build only optional standalone Vulkan probe
+        run: cmake --build build-vulkan --target nopen-vulkan-probe --parallel 2
+      - name: Probe argument help only, no GPU allocation
+        run: ctest --test-dir build-vulkan -R '^legacy_vulkan_probe_help$' --output-on-failure

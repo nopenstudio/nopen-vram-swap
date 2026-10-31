@@ -1,67 +1,65 @@
-> **Current experimental line v0.6.0-dev:** [GPU-loss fail-closed recovery, optional CPU mirror and memory budgets](v060/README_TR.md). Global Linux swap remains unverified; first stable release will be v1.0.
+# Nopen VRAM SWAP
 
----
+**Experimental AMD GPU-memory research for Linux and future NopenOS.**  
+**Current development: v0.8.5 Reserved VRAM, not a usable kernel SWAP product.**
 
-> **Current experimental lane: v0.5.0-dev.** [Safe Linux VM telemetry and freestanding memory pressure policy](v050/README_TR.md). Read-only kernel-aware userspace prototype, NOT an installed kernel swap module. First stable version targets v1.0.
+[Türkçe](README_TR.md) · [Project status](docs/STATUS.md) · [Architecture](docs/ARCHITECTURE.md) · [Safety rules](docs/SAFETY.md) · [Build and tests](docs/DEVELOPMENT.md) · [Version history](docs/RELEASES.md)
 
----
+> **SAFETY: KERNEL_SWAP_BLOCKED.** Nopen does not currently offer safe system-wide VRAM-backed SWAP. Earlier live NBD and 4 GiB ublk SWAP experiments produced serious failures, including a complete host freeze. Do not enable archived SWAP launchers on your everyday computer. The installed **zram** should be left alone.
 
-> **Current experimental lane: v0.4.0-dev.** [64/256/1024 MiB CPU-RAM versus cooperative VRAM pager economics](v040/README_TR.md). Not system-wide swap; first stable release is v1.0.
+## What is verified
 
----
+| Component | Evidence | Important limitation |
+|---|---|---|
+| Process-local OpenCL GPU storage | Tagged 1 GiB full-arena write/read, AMD RX 9060 XT | Not pinned physical VRAM |
+| v0.8.5 soft Holder | 1 GiB, 15-second real GPU run; initial and final integrity PASS | Immediately-after-close global VRAM accounting remained elevated; release not yet established |
+| v0.8.5 preflight/observer | Real AMDGPU VRAM/GTT and MemAvailable counters | Read-only budget, not actual reservation |
+| v0.8.4 reclaim-cycle model | Synthetic cycle and alive-but-stalled mock I/O tests | Real kernel deadlock cause still unknown |
+| v0.8.3 isolated worker | Mock crash/timeout/bad-IPC failures handled fail-closed | Not a kernel reclaim survival proof |
+| Issue #10 raw ublk | 256 MiB, 165/165 I/O requests complete, 3 verified block roundtrips | No kernel SWAP |
 
-> **Experimental v0.3.0 development:** [VRAM page prefetch and the v1.0 release gates](v030/README_TR.md). No transparent system SWAP yet; the first stable release target is v1.0.
+**Latest first-party hardware observation:** the v0.8.5 Holder raised global VRAM use from approximately **763 MiB** to **1,944–1,957 MiB** while holding a 1 GiB OpenCL pool. Immediately after closing the store, VRAM use was still **1,931 MiB**. This does **not** yet prove a leak, persistent pinning, or successful physical release. See [measurement log](docs/reports/2026-10-31-rx9060xt.md).
 
----
+## Repository map
 
-> **In development:** [v0.2.0 GPU transfer laboratory](v020/README_TR.md) — Alpha.5 is retained as the final architecture alpha. Bulk OpenCL + contiguous page transfer development does not yet constitute global SWAP or a proven speedup.
-
----
-
-# Nopen VRAM-SWAP — v0.12.0-alpha.5
-
-**New milestone:** standalone freestanding-friendly ISO C11 page policy and honest process RSS economics. Compare an identical deterministic CPU anonymous-RAM workload against the OpenCL+userfaultfd application-level pager.
-
-**AMD RX 9060 XT alpha.4 evidence:** 100,000 random 4KiB operations, 1,024/1,024 pages final verification, p99=120.71µs, 78,753 page-outs / 77,761 page-ins. **Alpha.5 OpenCL economics awaits actual GPU measurements.**
-
-**NOT global Linux SWAP, NOT a kernel module, NOT GNU-independent end-to-end, and NOT an implemented NopenOS.** Legacy OpenCL+NBD global swap caused critical system failures; do not restart it.
-
-[Alpha.5 Turkish guide](v012/README_ALPHA5_TR.md) · [Portability and future swap](v012/docs/PORTABILITY_AND_SWAP_TR.md)
-
----
-
-# Nopen VRAM-SWAP — v0.12.0-alpha.4
-
-**Research goal:** real, safe AMD GPU VRAM-backed Linux swap for future NopenOS.
-**Current status:** deterministic random endurance of a *process-local* OpenCL + `userfaultfd` pager, NOT system SWAP.
-
-The previously tested OpenCL+NBD *global* swap path suffered unrecoverable I/O stalls, cascading SIGBUS errors, and PID 1 kernel panic. Do **not** restart the archived NBD swap services. Neither `/dev/nbd15` nor `swapon` is used in the active v0.12 laboratory.
-
-### Verified on RX 9060 XT
-
-| Release | Actual hardware observations |
+| Path | Purpose |
 |---|---|
-| Alpha.1 | AMD OpenCL 64 MiB + userfaultfd 768 page restorations |
-| Alpha.2 | 1,024 logical pages / 32 resident pages; 6,144 evictions, 3,072 page-ins; verified |
-| Alpha.3 | 512 logical pages / 16 resident pages; 2,976 evictions, 2,480 page-ins; verified |
-| Alpha.4 | Random access endurance, sampled operation latency percentiles, full final page verification; **AMD hardware test pending** |
+| `v085/` | **Active:** Reserved VRAM diagnostics and bounded GPU-only soft Holder |
+| `v084/` · `v083/` | Reclaim-dependency model and isolated-worker reliability tests |
+| `v080/` · `v070/` · `v060/` | GPU benchmarks, shadow/ublk experiments and worker IPC |
+| `v050/` · `v040/` · `v030/` · `v020/` · `v012/` | Historical foundations; **some experimental commands are unsafe** |
+| `src/` | Archived, optional Vulkan 0.10 probe |
+| `legacy/` | Original NBD archive (historical evidence; do not launch) |
+| `docs/` | Authoritative current technical status, decisions and safety boundaries |
 
-### Build and test (Garuda Linux)
+Version folders are intentionally retained because later versions compile and test code from earlier folders. They are **not** a list of independently production-ready releases.
 
-```bash
-cmake -S v012 -B build-v012 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
-cmake --build build-v012 --parallel
-ctest --test-dir build-v012 --output-on-failure
-./build-v012/nopen-vram-demand --probe
-# Ensure swapon --show contains no NBD device before running:
-./build-v012/nopen-vram-demand \
-  --backend opencl --pool-mib 64 --logical-pages 512 --ram-pages 16 \
-  --stress --operations 10000 --seed 20261027 \
-  --hot-pages 32 --hot-percent 80 --write-percent 30
+## Build safely
+
+The **repository-root CMake** defaults to a CPU/mock-only build; no GPU or SWAP access is needed:
+
+```sh
+cmake -S . -B build -DNOPEN_OPENCL=OFF
+cmake --build build --parallel 2
+ctest --test-dir build -R '^v08[345]_' --output-on-failure
 ```
 
-The alpha.4 stress mode caps GPU allocations at 256 MiB; start with 64 MiB and without running games. A `STRESS_PASS` proves checksums/data equality for the explicit application arena only; it does **not** extend other processes' RAM, guarantee GPU reset recovery, or imply kernel/global swap safety.
+Read-only AMDGPU availability check, on an AMD-equipped Linux machine:
 
-[Turkish Alpha.4 guide](v012/README_ALPHA4_TR.md) · [Real Linux SWAP roadmap](v012/docs/TRUE_SWAP_ROADMAP_TR.md) · [History](docs/RELEASES.md)
+```sh
+python3 v085/tools/reserved_vram_preflight.py --pool-mib 4096
+python3 v085/tools/reserved_vram_observe.py --samples 5 --interval-seconds 1
+```
 
-The historical Vulkan-only probe remains in `src/`; `cmake -S v012` is the current Nopen Memory Fabric build.
+A passing preflight only says a GPU-only experiment has enough apparent headroom; it **does not** allocate or reserve memory. The actual GPU-only Holder is a separate, explicitly acknowledged experiment described in [v085/README.md](v085/README.md). No `sudo`, kernel device or `swapon` belongs in the default verification path.
+
+## Current research questions
+
+1. After exiting the OpenCL Holder, **when and why** do global AMDGPU VRAM counters return toward baseline?
+2. Can a driver-supported, **non-evictable** VRAM reservation be implemented without damaging graphics workloads?
+3. Can the entire I/O path remain able to make progress during kernel reclaim, with recoverable data following GPU reset?
+4. Only after (2) and (3) are demonstrated on recoverable lab hardware may the SWAP gate be reconsidered.
+
+**Development branch:** [`develop/v0.8.5`](https://github.com/nopenstudio/nopen-vram-swap/tree/develop/v0.8.5) · [Issue #10](https://github.com/nopenstudio/nopen-vram-swap/issues/10) · [Development PR #14](https://github.com/nopenstudio/nopen-vram-swap/pull/14)
+
+NopenOS is planned as a distinct, Linux-zen-based operating system. Python scripts and the present Linux host tools are *research harnesses*, not dependencies being imposed on a future GNU-free NopenOS userland. First stable software release has not been made.
