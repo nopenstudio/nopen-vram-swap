@@ -13,7 +13,7 @@ import re
 import sys
 
 EVENT = re.compile(r"NOPEN_DIAG_(UBLK|IPC|WORKER)\s+phase=(\w+)")
-FIELD = re.compile(r"(?:^|\s)([a-z_]+)=([^\s]+)")
+FIELD = re.compile(r"(?:^|\s)([a-z_][a-z0-9_]*)=([^\s]+)")
 REQUIRED = (
     ("UBLK", "BEGIN"), ("IPC", "BEGIN"), ("WORKER", "BEGIN"),
     ("WORKER", "GPU_ENTER"), ("WORKER", "GPU_RETURN"),
