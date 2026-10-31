@@ -109,7 +109,9 @@ int main(int argc,char **argv) {
                           (msg.bytes%NOPEN_PAGE_SIZE)!=0 ||
                           (msg.offset%NOPEN_PAGE_SIZE)!=0;
         int status=invalid?-EINVAL:0;
-        const uint64_t began=diag_monotonic_ms();
+        const char *trace=getenv("NOPEN_DIAG_IO_TRACE");
+        const uint64_t began=(trace && strcmp(trace,"1")==0)
+                             ?diag_monotonic_ms():0;
         diag_worker("BEGIN",&msg,status,began);
         const uint64_t incoming_checksum=msg.checksum;
         if(msg.op==NOPEN_IPC_WRITE) {
