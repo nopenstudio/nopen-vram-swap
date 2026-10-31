@@ -17,12 +17,37 @@ worker="$repo/build-v070/v060/nopen-isolated-worker"
 RAW_ACK=I_ACCEPT_RAW_UBLK_GPU_IO_CAN_HANG
 VRAM_ACK=I_ACCEPT_VOLATILE_GPU_ONLY_SWAP_CAN_LOSE_PAGES_AND_LOCKUP
 
+# This is a physical ublk driver pilot, not a remedy for high host memory
+# pressure. A previous baseline with ~3.75GiB zram used and 1.3GiB available
+# is NO-GO. Read-only checks; fail closed on malformed/missing proc data.
+raw_memory_gate() {
+  local available_kib zram_used_kib available_mib zram_used_mib
+  available_kib="$(awk '$1=="MemAvailable:" {print $2; exit}' /proc/meminfo)"
+  zram_used_kib="$(awk 'NR>1 && $1=="/dev/zram0" {print $4; exit}' /proc/swaps)"
+  if [[ ! "$available_kib" =~ ^[0-9]+$ || ! "$zram_used_kib" =~ ^[0-9]+$ ]];then
+    echo "ISSUE10_RAW_REFUSED cannot read MemAvailable or active /dev/zram0" >&2
+    return 2
+  fi
+  available_mib=$(( available_kib / 1024 ))
+  zram_used_mib=$(( zram_used_kib / 1024 ))
+  if (( available_mib < 3072 || zram_used_mib > 1024 ));then
+    echo "ISSUE10_RAW_REFUSED host memory pressure: MemAvailable=${available_mib}MiB (min=3072) zram_used=${zram_used_mib}MiB (max=1024)" >&2
+    return 2
+  fi
+  if python3 "$repo/v070/tools/find_bannerlord.py" --pid-only >/dev/null 2>&1;then
+    echo "ISSUE10_RAW_REFUSED close Bannerlord before the physical raw ublk pilot" >&2
+    return 2
+  fi
+  echo "ISSUE10_RAW_RAM_GUARD_PASS mem_available_mib=$available_mib zram_used_mib=$zram_used_mib"
+}
+
 case "$action" in
   preflight)
     if [[ "$capacity" != 256 ]];then
       echo "ISSUE10_RAW_REFUSED first diagnostic capacity is 256MiB ONLY" >&2;exit 2
     fi
     python3 "$repo/v080/tools/issue10_next_swap_readiness.py"
+    raw_memory_gate
     python3 "$repo/v080/tools/v081_direct4g_preflight.py"
     echo "ISSUE10_RAW_PREFLIGHT_PASS no_gpu_alloc=YES no_kernel_swap=YES"
     exit 0;;
@@ -37,6 +62,9 @@ case "$action" in
 esac
 
 [[ $EUID == 0 ]] || { echo "ISSUE10_RAW_REFUSED root required"; exit 2; }
+# Re-evaluate immediately before any privileged action, even when a prior
+# preflight report passed hours earlier. Never bypass this live host check.
+raw_memory_gate
 [[ "${NOPEN_ISSUE10_RAW_ACK:-}" == "$RAW_ACK" ]] || {
   echo "ISSUE10_RAW_REFUSED explicit risk acknowledgment required";exit 9;
 }
