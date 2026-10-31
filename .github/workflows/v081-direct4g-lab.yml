@@ -1,0 +1,44 @@
+name: v0.8.1 experimental physical 4GiB VRAM-only swap gated build
+on:
+  push:
+    branches: ["experiment/v081-4g-vram-direct-swap"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  v081-direct4g-syntax-and-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check shell entrypoint and Python game monitor
+        run: |
+          bash -n v080/tools/run_v081_bannerlord.sh
+          python3 -m py_compile v080/tools/bannerlord_v081_probe.py
+          python3 v080/tests/test_v081_bannerlord_probe.py
+          bash -n v080/tools/test_alpha10_vram_direct.sh
+          bash -n v070/tools/vram_swap_lab.sh
+          bash -n v080/tools/v081_direct4g_kernel_lab.sh
+          python3 -m py_compile v080/tools/v081_direct4g_preflight.py
+          python3 v080/tests/test_v081_direct4g_launcher.py
+      - name: Build and test GPU-only 4KiB and 64KiB page integrity
+        run: |
+          cmake -S v080 -B build-v081-ci -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=OFF
+          cmake --build build-v081-ci --parallel
+          ctest --test-dir build-v081-ci --output-on-failure
+          echo "V081_GPU_ONLY_CI_PASS kernel_swap=NO ssd_shadow=NO"
+  v081-direct4g-ublk-compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install libublksrv and OpenCL development dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake libtool pkg-config g++ cmake \
+            liburing-dev ocl-icd-opencl-dev opencl-headers util-linux
+      - name: Build real ublk GPU-direct target but never activate kernel SWAP
+        run: |
+          bash v070/tools/build_ublk.sh
+          test -x build-v070/nopen-v070-ublk
+          echo "V081_REAL_UBLK_BUILD_PASS kernel_swap=NO"
