@@ -1,4 +1,4 @@
-name: Issue 10: trace-only mock regression (never kernel SWAP)
+name: "Issue 10 mock trace regression (never kernel SWAP)"
 
 on:
   push:
