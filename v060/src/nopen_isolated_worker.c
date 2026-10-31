@@ -73,6 +73,9 @@ int main(int argc,char **argv) {
             free(buffer);nopen_blk_close(b);return 4;
         }
         fputs("NOPEN_V070_WARNING worker staging not mlocked; reclaim risk remains\n",stderr);
+    } else if(geteuid()==0) {
+        fprintf(stderr,"NOPEN_DIRECT_WORKER_STAGING_MLOCK_PASS bytes=%u\n",
+                (unsigned)NOPEN_BLK_MAX_BYTES);
     }
     for(;;) {
         if(recv_all(fd,&msg,sizeof(msg))!=0)break;
