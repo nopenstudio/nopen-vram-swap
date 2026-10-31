@@ -133,7 +133,7 @@ int main(int argc,char **argv) {
             if(selected) {
                 fprintf(stderr,"V084_MOCK_RECLAIM_WAIT worker_alive=YES"
                                " synthetic_dependency=YES op=%s"
-                               " actual_reclaim=NO gpu=NO\\n",
+                               " actual_reclaim=NO gpu=NO\n",
                         msg.op==NOPEN_IPC_READ?"READ":"WRITE");
                 fflush(stderr);
                 struct timespec hold={.tv_sec=10,.tv_nsec=0};
