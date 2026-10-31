@@ -1,6 +1,6 @@
 # Nopen VRAM SWAP v0.8.5 | Reserved VRAM (Phase A)
 
-**Development state: budget/preflight & observation tools implemented.**
+**Development state: read-only budget/observation plus an explicitly opted-in, bounded userspace OpenCL soft holder.**
 **Driver-enforced partitioning, guaranteed VRAM pinning and live kernel SWAP
 are NOT implemented.** This revision is deliberately a research milestone,
 not a boot-time SWAP service and not a production allocator.
@@ -74,13 +74,59 @@ preflight. The tools never request root. The result may say
 userspace GPU-only allocation**, not `4GiB VRAM reserved` or
 `kernel swap safe`.
 
+## Phase B first implementation: bounded GPU-only holder (experimental)
+
+The earlier `v080` GPU benchmark on the user's RX 9060 XT was verified
+locally with a **1024MiB OpenCL direct** pool, full 1GiB tagged arena write
+and readback in 1.084 seconds, 1 full pass, 32 transfer operations per
+chunk size. Measured one-direction rates:
+
+| Transfer size | Write MiB/s | Read MiB/s |
+|---|---:|---:|
+| 4 KiB | 164.92 | 266.88 |
+| 64 KiB | 2000.79 | 2653.69 |
+| 1 MiB | 10371.17 | 9883.77 |
+| 4 MiB | 9476.80 | 19325.08 |
+
+No kernel SWAP used. The test verified logical OpenCL buffer data, not
+non-evictable physical residency.
+
+`src/nopen_reserved_holder.c` now creates the same nopen_store OpenCL
+pool but holds it for a **bounded 5–60 seconds** while fully checking each
+tagged page after initialization, sampling individual pages every second,
+monitoring OS-wide VRAM/GTT and host RAM counters (which cannot be
+attributed to Nopen alone), and finally re-reading the entire arena before
+release. It aborts for insufficient host RAM/VRAM headroom, unexpected
+missing GPU counters, or active ublk/NBD kernel swap. No worker can
+reliably enforce physical GPU pinning with the current OpenCL API.
+Blocking OpenCL calls are also not guaranteed bounded if the GPU driver
+hangs: this is **NOT a kernel reclaim or liveness proof**.
+
+Current OpenCL exposure is deliberately limited to **1 GiB**, never 4 GiB,
+requires a non-root user and exact `--ack` string, and requires 4096MiB
+VRAM headroom + 1024MiB host RAM for the preflight. Mock-only 4–16MiB
+modes are used in CI.
+
+Safe GPU-only interactive command on an idle desktop (no game):
+```sh
+cmake -S v085 -B build-v085-gpu -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+cmake --build build-v085-gpu --target nopen-v085-reserved-holder --parallel 2
+./build-v085-gpu/nopen-v085-reserved-holder \
+  --backend opencl --pool-mib 1024 --seconds 15 \
+  --ack I_ACCEPT_1GIB_HOLDER_NO_SWAP
+```
+
+The tool prints `V085_HOLDER_FULL_ARENA_PASS` and
+`V085_HOLDER_FINAL_INTEGRITY_PASS` only if verified, and outputs global
+VRAM/GTT and MemAvailable samples while holding. It will print
+`V085_HOLDER_PASS` after release, but **never** claims driver partition,
+application-visible 12GiB capacity or guaranteed physical VRAM pinning.
+
 ## Next engineering phases (NOT shipped)
 
-B. A bounded user-space-only VRAM allocation/holding prototype with
-   explicit opt-in, read-back verification, AMDGPU global counters and
-   independently measured game coexistence. Use existing OpenCL code,
-   not an unreviewed boot script. Such a pool will still be **soft**,
-   potentially migrated, and inaccessible if the worker fails.
+B2. Independently measure game coexistence only after the bounded GPU-only
+   holder is validated locally, starting with a smaller memory pool. Never
+   combine this experiment with active GPU kernel SWAP.
 C. Investigate an actual AMDGPU kernel/DRM memory-manager-reservation
    integration or supported equivalent, accounting for driver scheduling,
    user virtual memory and boot-time display/multi-GPU initialization.
