@@ -37,6 +37,7 @@ jobs:
         run: |
           bash -n v080/tools/issue10_ublk_raw_only.sh
           python3 v080/tests/test_issue10_raw_only_launcher.py
+          python3 v080/tests/test_issue10_raw_memory_gate.py
       - name: Confirm no kernel SWAP commands in diagnostic test
         run: |
           ! grep -En '(^|[^a-z])swapon([[:space:]]|\()|(^|[^a-z])swapoff([[:space:]]|\()|mkswap|modprobe|/dev/ublk' v060/tests/test_issue10_ipc_trace.py
