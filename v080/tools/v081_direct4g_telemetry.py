@@ -86,7 +86,7 @@ def main() -> int:
             if stream is None:
                 print(encoded,flush=True)
             else:
-                stream.write(encoded+"\\n")
+                stream.write(encoded+"\n")
                 stream.flush()
                 os.fsync(stream.fileno())
             if index+1<args.samples: time.sleep(args.interval)
