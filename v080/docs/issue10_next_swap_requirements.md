@@ -57,6 +57,15 @@ The **real** pilot creates a privileged ublk block device and executes real GPU 
 
 **Evidence required:** `ISSUE10_RAW_PAGE_PASS` for all three offsets; `NOPEN_DIAG_UBLK BEGIN/END`, `NOPEN_DIAG_IPC BEGIN/END`, `NOPEN_DIAG_WORKER GPU_ENTER/GPU_RETURN`; successful device removal and service stop. If any step fails or cleanup is incomplete, inspect logs rather than running again.
 
+**Analyze a captured raw ublk service log without touching the device:**
+
+```sh
+sudo python3 v080/tools/issue10_analyze_raw_trace.py \
+  --full-service-log /var/log/nopen-v070/issue10-raw-YYYYMMDD-HHMMSS-PID.log
+```
+
+The analyzer pairs all eight `UBLK BEGIN → IPC BEGIN → WORKER BEGIN → GPU ENTER → GPU RETURN → WORKER RESPONSE_SENT → IPC END → UBLK END` stages, detects returned errors and unmatched/mismatched requests, counts reads/writes, and rejects a full service log that lacks the three expected test writes. Pass `--full-service-log` **only for the original service log**, not a terminal paste or clipped grep excerpt. The 31 Oct user's 509 trace lines were a clipped excerpt: 64 completions, 63 starts and no observed nonzero errors; most observed READ requests were likely block-device metadata scans, but the originating processes were not identified. `elapsed_ms=0` only means below the 1ms clock resolution; it is not a throughput measurement. `GPU_ENTER` is a backend function boundary, and reads of never-written pages can return from the ZERO fast path without a real OpenCL read. A write followed by a matched verified read and checksum check provides stronger actual VRAM evidence.
+
 **Important:** This probes I/O dispatch through ublk but still does not test Linux swap reclaim, swap-in / swap-out, GPU page preservation after reset, or safety of future real 4GiB swap.
 
 ## Phase 3 | real SWAP gate remains CLOSED
