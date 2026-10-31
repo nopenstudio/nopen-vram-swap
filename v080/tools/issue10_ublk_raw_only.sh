@@ -127,7 +127,9 @@ cleanup() {
           result=80
         fi
       fi
-      if (( result != 80 ));then
+      if (( result != 80 )) &&
+         { systemctl is-active --quiet "$service" ||
+           systemctl is-failed --quiet "$service"; };then
         if ! timeout --signal=TERM --kill-after=3s 12s systemctl stop "$service";then
           echo "ISSUE10_RAW_CLEANUP_INCOMPLETE service stop failed" >&2
           result=81
@@ -153,6 +155,9 @@ cleanup() {
 trap 'cleanup $?' EXIT
 
 echo "ISSUE10_RAW_BEGIN capacity_mib=256 device=$dev physical_ublk=YES kernel_swap=NO log=$logfile"
+# If systemd-run partially creates a unit but exits with failure, EXIT cleanup
+# still owns this (previously absent) device/unit and must inspect it.
+owned=1
 systemd-run --system --quiet --unit=nopen-issue10-ublk-raw \
   --service-type=exec --collect \
   --property=Restart=no \
@@ -173,7 +178,6 @@ systemd-run --system --quiet --unit=nopen-issue10-ublk-raw \
   --setenv=MALLOC_ARENA_MAX=1 \
   "$target" add -t nopen-vram-swap-lab -n "$id" -q 1 -d 16 \
     --max_io_buf_bytes 65536
-owned=1
 ready=0
 for (( i=0;i<120;i++ ));do
   if [[ -b "$dev" ]];then ready=1;break;fi
