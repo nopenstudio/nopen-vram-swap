@@ -9,6 +9,7 @@ action="${1:-preflight}"
 dev=/dev/ublkb23
 id=23
 service=nopen-v070-ublk.service
+monitor_service=nopen-v081-direct4g-monitor.service
 state=/run/nopen-v070
 logdir=/var/log/nopen-v070
 target="$repo/build-v070/nopen-v070-ublk"
@@ -29,7 +30,10 @@ case "$action" in
       echo "V081_DIRECT4G_REFUSED stop needs sudo";exit 2
     fi
     bash "$repo/v070/tools/vram_swap_lab.sh" stop
-    rm -f "$state/storage-mode"
+    if systemctl is-active --quiet "$monitor_service";then
+      systemctl stop "$monitor_service" || true
+    fi
+    rm -f "$state/storage-mode" "$state/monitor-log"
     exit 0;;
   preflight)
     python3 "$repo/v080/tools/v081_direct4g_preflight.py"
@@ -64,8 +68,9 @@ python3 "$repo/v080/tools/v081_direct4g_preflight.py"
   { echo "V081_DIRECT4G_REFUSED ublk device 23 already allocated";exit 2; }
 [[ ! -e "$state/device" && ! -e "$state/shadow-file" ]] ||
   { echo "V081_DIRECT4G_REFUSED old Nopen state; inspect first";exit 2; }
-if systemctl is-active --quiet "$service";then
-  echo "V081_DIRECT4G_REFUSED existing ublk daemon";exit 2
+if systemctl is-active --quiet "$service" ||
+   systemctl is-active --quiet "$monitor_service";then
+  echo "V081_DIRECT4G_REFUSED existing ublk or monitor service";exit 2
 fi
 [[ -x "$target" && -x "$controller" && -x "$worker" ]] ||
   { echo "V081_DIRECT4G_REFUSED compile with bash v070/tools/build_ublk.sh first";exit 2; }
@@ -95,7 +100,8 @@ rollback_if_inactive() {
     timeout 8s "$controller" del -n "$id" || true
   fi
   systemctl stop "$service" >/dev/null 2>&1 || true
-  rm -f "$state/device" "$state/capacity" "$state/storage-mode"
+  systemctl stop "$monitor_service" >/dev/null 2>&1 || true
+  rm -f "$state/device" "$state/capacity" "$state/storage-mode" "$state/monitor-log"
 }
 on_exit() {
   local rc=$?
@@ -156,6 +162,17 @@ timeout 12s dd if="$dev" of="$state/direct4g-readback" bs=4096 count=4 \
   iflag=direct status=none
 cmp "$state/direct4g-raw" "$state/direct4g-readback"
 echo "V081_DIRECT4G_RAW_INTEGRITY_PASS before_kernel_swapon=YES"
+monitor_log="$logdir/direct4g-monitor-$(date +%Y%m%d-%H%M%S)-${BASHPID}.jsonl"
+install -m 0640 /dev/null "$monitor_log"
+printf '%s\\n' "$monitor_log" > "$state/monitor-log"
+systemd-run --system --quiet --unit=nopen-v081-direct4g-monitor \
+  --service-type=exec --collect \
+  --property=Restart=no \
+  --property=OOMScoreAdjust=-900 \
+  --property="StandardOutput=append:$monitor_log" \
+  --property="StandardError=append:$logfile" \
+  /usr/bin/python3 -u "$repo/v080/tools/v081_direct4g_telemetry.py"
+echo "V081_DIRECT4G_MONITOR_STARTED logfile=$monitor_log"
 mkswap -f "$dev"
 swapon -p "$priority" "$dev"
 if ! is_active;then
@@ -168,4 +185,5 @@ echo "V081_DIRECT4G_REAL_SWAP_ACTIVE device=$dev capacity_mib=4096 priority=$pri
 echo "V081_DIRECT4G_BACKING GPU_VRAM_ONLY=YES SSD_SHADOW=NO ZRAM_PRESERVED=YES"
 echo "V081_DIRECT4G_NOT_CERTIFIED gpu_reset_recovery=NO forward_progress=UNPROVEN"
 echo "V081_DIRECT4G_LOG=$logfile"
+echo "V081_DIRECT4G_TELEMETRY_LOG=$monitor_log"
 echo "Stop only when system is responsive: sudo bash $repo/v080/tools/v081_direct4g_kernel_lab.sh stop"
