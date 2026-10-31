@@ -17,12 +17,25 @@ fi
 if grep -Eq '^/dev/(ublkb|nbd)' /proc/swaps;then
   echo "V081_REFUSED active kernel ublk/NBD swap";exit 2
 fi
-# Perform lightweight preflight before compiling or touching GPU memory.
+# Never rerun the entire 60-test CTest suite or compile during a game.
+# The v040 memory-economics tests intentionally refuse under real game RAM
+# pressure, even though the GPU coexistence bench has not yet started.
+# First run the baseline with the game closed to build and test everything.
+bench="$repo/build-v081/nopen-v080-vram-direct-bench"
+worker="$repo/build-v081/v070/v060/nopen-isolated-worker"
 python3 -m py_compile v080/tools/bannerlord_v081_probe.py
-cmake -S v080 -B build-v081 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
-cmake --build build-v081 --parallel
-ctest --test-dir build-v081 --output-on-failure
+if [[ "$mode" == baseline ]]; then
+  cmake -S v080 -B build-v081 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+  cmake --build build-v081 --parallel
+  ctest --test-dir build-v081 --output-on-failure
+else
+  if [[ ! -x "$bench" || ! -x "$worker" ]]; then
+    echo "V081_GAME_REFUSED game mode needs baseline-built executables; run baseline with game closed first" >&2
+    exit 2
+  fi
+  echo "V081_GAME_REUSE_PREBUILT ctest_under_game=NO compile_under_game=NO kernel_swap=NO"
+fi
 exec python3 v080/tools/bannerlord_v081_probe.py \
   --mode "$mode" --capacity-mib "$capacity" --rounds 3 \
-  --bench "$repo/build-v081/nopen-v080-vram-direct-bench" \
-  --worker "$repo/build-v081/v070/v060/nopen-isolated-worker"
+  --bench "$bench" \
+  --worker "$worker"

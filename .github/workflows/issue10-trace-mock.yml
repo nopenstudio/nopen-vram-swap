@@ -1,0 +1,63 @@
+name: "Issue 10 mock trace regression (never kernel SWAP)"
+
+on:
+  push:
+    branches:
+      - diagnostics/issue-10-io-trace
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mock-ipc-phase-trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure mock-only backend
+        run: cmake -S v060 -B build-issue10 -DCMAKE_BUILD_TYPE=Debug -DNOPEN_OPENCL=OFF
+      - name: Compile tracing and test binaries
+        run: cmake --build build-issue10 --parallel 2
+      - name: Validate trace BEGIN/END, GPU worker phases and injected timeout
+        run: ctest --test-dir build-issue10 -R v060_issue10_trace_mock_only --output-on-failure
+      - name: Guard against game-mode CTest under RAM pressure
+        run: |
+          bash -n v080/tools/run_v081_bannerlord.sh
+          python3 v080/tests/test_v081_runner_game_gate.py
+          python3 v080/tests/test_v081_bannerlord_probe.py
+          python3 v070/tests/test_game_pid.py
+      - name: Validate read-only audit and fsynced telemetry file
+        run: |
+          python3 -m py_compile v080/tools/issue10_next_swap_readiness.py
+          python3 -m py_compile v080/tools/v081_direct4g_telemetry.py
+          python3 v080/tests/test_issue10_preparation.py
+          bash -n v080/tools/v081_direct4g_kernel_lab.sh
+      - name: Validate separately gated raw-only ublk pilot without running it
+        run: |
+          bash -n v080/tools/issue10_ublk_raw_only.sh
+          python3 v080/tests/test_issue10_raw_only_launcher.py
+          python3 v080/tests/test_issue10_raw_memory_gate.py
+          python3 v080/tests/test_issue10_trace_analyzer.py
+      - name: Confirm no kernel SWAP commands in diagnostic test
+        run: |
+          ! grep -En '(^|[^a-z])swapon([[:space:]]|\()|(^|[^a-z])swapoff([[:space:]]|\()|mkswap|modprobe|/dev/ublk' v060/tests/test_issue10_ipc_trace.py
+          echo ISSUE10_MOCK_TRACE_CI_PASS gpu_context=NO kernel_swap=NO zram=UNMODIFIED
+
+  ublk-build-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies (not kernel modules)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake libtool pkg-config g++ cmake \
+            liburing-dev ocl-icd-opencl-dev opencl-headers util-linux
+      - name: Build traced ublk target (DO NOT launch)
+        run: |
+          bash v070/tools/build_ublk.sh
+          bash -n v080/tools/v081_direct4g_kernel_lab.sh
+          python3 v080/tests/test_v081_direct4g_launcher.py
+          test -x build-v070/nopen-v070-ublk
+          echo ISSUE10_UBLK_BUILD_ONLY_PASS kernel_device=NO swapon=NO

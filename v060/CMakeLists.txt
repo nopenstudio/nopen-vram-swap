@@ -71,6 +71,15 @@ add_test(NAME v060_isolated_gpu_process_deadline_and_ipc_checksum
 set_tests_properties(v060_isolated_gpu_process_deadline_and_ipc_checksum
     PROPERTIES PASS_REGULAR_EXPRESSION "ISOLATED_TEST_PASS" TIMEOUT 15)
 
+# Issue #10: exercise low-level tracing in MOCK mode only (no swapon or GPU).
+add_test(NAME v060_issue10_trace_mock_only
+    COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_LIST_DIR}/tests/test_issue10_ipc_trace.py"
+            $<TARGET_FILE:nopen-test-isolated-io>
+            $<TARGET_FILE:nopen-isolated-worker>)
+set_tests_properties(v060_issue10_trace_mock_only PROPERTIES
+    PASS_REGULAR_EXPRESSION "ISSUE10_TRACE_TEST_PASS" TIMEOUT 40)
+
 add_test(NAME v060_mock_independent_GPU_worker_integration
     COMMAND nopen-isolated-smoke --worker $<TARGET_FILE:nopen-isolated-worker>
             --backend mock --operations 400 --timeout-ms 1000)

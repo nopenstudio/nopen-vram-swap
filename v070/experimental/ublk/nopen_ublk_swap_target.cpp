@@ -23,12 +23,31 @@ extern "C" {
 #include <cstdlib>
 #include <cstring>
 #include <new>
+#include <time.h>
 #include <unistd.h>
 
 namespace {
 constexpr unsigned kMiB = 1024u*1024u;
 constexpr unsigned kDefaultCapacityMiB = 64u;
 constexpr unsigned kPageSize = 4096u;
+static uint64_t diag_ms() {
+    timespec t{};
+    if(clock_gettime(CLOCK_MONOTONIC,&t)!=0)return 0;
+    return static_cast<uint64_t>(t.tv_sec)*1000u+
+           static_cast<uint64_t>(t.tv_nsec)/1000000u;
+}
+static void diag_ublk(const char* phase,unsigned op,uint64_t off,
+                      size_t bytes,int rc,uint64_t started) {
+    const char* value=getenv("NOPEN_DIAG_IO_TRACE");
+    if(!value || strcmp(value,"1")!=0)return;
+    const uint64_t now=diag_ms();
+    fprintf(stderr,"NOPEN_DIAG_UBLK phase=%s t_ms=%llu"
+                   " op=%u offset=%llu bytes=%zu rc=%d elapsed_ms=%llu\n",
+            phase,static_cast<unsigned long long>(now),op,
+            static_cast<unsigned long long>(off),bytes,rc,
+            static_cast<unsigned long long>(now-started));
+    fflush(stderr);
+}
 struct NopenTarget {
     nopen_recovery* backing=nullptr;
     nopen_isolated_io* isolated=nullptr;
@@ -215,6 +234,10 @@ int on_io(const ublksrv_queue* q,const ublk_io_data* io) {
     uint64_t offset=static_cast<uint64_t>(iod->start_sector)*512u;
     size_t bytes=static_cast<size_t>(iod->nr_sectors)*512u;
     void* buf=ublksrv_queue_get_io_buf(q,io->tag);
+    const char* trace=getenv("NOPEN_DIAG_IO_TRACE");
+    const bool tracing=trace && strcmp(trace,"1")==0;
+    const uint64_t started=tracing?diag_ms():0;
+    if(tracing)diag_ublk("BEGIN",op,offset,bytes,0,started);
     int rc=-EOPNOTSUPP;
     /* OpenCL writes are synchronous and complete when acknowledged.
      * FLUSH does not promise persistence across GPU resets/reboots; it only
@@ -238,6 +261,7 @@ int on_io(const ublksrv_queue* q,const ublk_io_data* io) {
         }
     }
     // A checked successful completion returns number of transferred bytes.
+    if(tracing)diag_ublk(rc==0?"END":"FAIL",op,offset,bytes,rc,started);
     ublksrv_complete_io(q,io->tag,rc==0?static_cast<int>(bytes):rc);
     return 0;
 }

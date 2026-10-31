@@ -33,6 +33,23 @@ static int recv_all(int fd,void *buf,size_t n) {
     }
     return 0;
 }
+/* Trace individual IPC/driver phases, opt-in and data-free. */
+static uint64_t diag_monotonic_ms(void) {
+    struct timespec t;
+    if(clock_gettime(CLOCK_MONOTONIC,&t)!=0)return 0;
+    return (uint64_t)t.tv_sec*1000u+(uint64_t)t.tv_nsec/1000000u;
+}
+static void diag_worker(const char *phase,const nopen_ipc_msg *m,
+                        int status,uint64_t began) {
+    const char *v=getenv("NOPEN_DIAG_IO_TRACE");
+    if(!v || strcmp(v,"1")!=0)return;
+    const uint64_t now=diag_monotonic_ms();
+    fprintf(stderr,"NOPEN_DIAG_WORKER phase=%s t_ms=%" PRIu64
+            " op=%s offset=%" PRIu64 " bytes=%u status=%d elapsed_ms=%" PRIu64 "\n",
+            phase,now,m->op==NOPEN_IPC_READ?"READ":"WRITE",
+            m->offset,m->bytes,status,now-began);
+    fflush(stderr);
+}
 /* Live kernel swap cannot depend on an easily OOM-killed userspace worker.
  * Best-effort OOM protection and mlock of its 64KiB staging buffer. OpenCL
  * runtime/driver allocations are NOT mlocked or guaranteed forward-progress.
@@ -92,14 +109,24 @@ int main(int argc,char **argv) {
                           (msg.bytes%NOPEN_PAGE_SIZE)!=0 ||
                           (msg.offset%NOPEN_PAGE_SIZE)!=0;
         int status=invalid?-EINVAL:0;
+        const char *trace=getenv("NOPEN_DIAG_IO_TRACE");
+        const uint64_t began=(trace && strcmp(trace,"1")==0)
+                             ?diag_monotonic_ms():0;
+        diag_worker("BEGIN",&msg,status,began);
         const uint64_t incoming_checksum=msg.checksum;
         if(msg.op==NOPEN_IPC_WRITE) {
             if(!status && recv_all(fd,buffer,msg.bytes)!=0)break;
             if(!status && nopen_page_checksum(buffer,msg.bytes)!=incoming_checksum)
                 status=-EBADMSG;
-            if(!status)status=nopen_blk_write(b,msg.offset,buffer,msg.bytes);
+            if(!status) {
+                diag_worker("GPU_ENTER",&msg,status,began);
+                status=nopen_blk_write(b,msg.offset,buffer,msg.bytes);
+                diag_worker("GPU_RETURN",&msg,status,began);
+            }
         } else if(!status) {
+            diag_worker("GPU_ENTER",&msg,status,began);
             status=nopen_blk_read(b,msg.offset,buffer,msg.bytes);
+            diag_worker("GPU_RETURN",&msg,status,began);
         }
         if(status<0) {
             fprintf(stderr,
@@ -118,6 +145,7 @@ int main(int argc,char **argv) {
         if(send_all(fd,&msg,sizeof(msg))!=0)break;
         if(status==0 && msg.op==NOPEN_IPC_READ &&
            send_all(fd,buffer,msg.bytes)!=0)break;
+        diag_worker("RESPONSE_SENT",&msg,status,began);
         if(status<0)break; /* No silent fallback after any corrupted I/O. */
     }
     free(buffer);

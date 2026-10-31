@@ -108,6 +108,11 @@ on_exit() {
   if (( rc!=0 ));then rollback_if_inactive;fi
 }
 trap on_exit EXIT
+# Instrumentation is off by default. Never enable live SWAP merely to test tracing.
+trace_flags=()
+if [[ "${NOPEN_DIAG_IO_TRACE:-0}" == 1 ]];then
+  trace_flags+=(--setenv=NOPEN_DIAG_IO_TRACE=1)
+fi
 echo "V081_DIRECT4G_START storage=VRAM_ONLY ssd_shadow=NO zram=UNCHANGED"
 systemd-run --system --quiet --unit=nopen-v070-ublk \
   --service-type=exec --collect \
@@ -118,6 +123,7 @@ systemd-run --system --quiet --unit=nopen-v070-ublk \
   --property=LimitMEMLOCK=infinity \
   --property="StandardOutput=append:$logfile" \
   --property="StandardError=append:$logfile" \
+  "${trace_flags[@]}" \
   --setenv=NOPEN_V070_KERNEL_SWAP_TEST=EXPERIMENTAL_GPU_SWAP_CAN_HANG \
   --setenv=NOPEN_UBLK_BACKEND=opencl \
   --setenv=NOPEN_UBLK_STORAGE_MODE=vram-direct \
@@ -171,7 +177,8 @@ systemd-run --system --quiet --unit=nopen-v081-direct4g-monitor \
   --property=OOMScoreAdjust=-900 \
   --property="StandardOutput=append:$monitor_log" \
   --property="StandardError=append:$logfile" \
-  /usr/bin/python3 -u "$repo/v080/tools/v081_direct4g_telemetry.py"
+  /usr/bin/python3 -u "$repo/v080/tools/v081_direct4g_telemetry.py" \
+    --output-file "$monitor_log"
 echo "V081_DIRECT4G_MONITOR_STARTED logfile=$monitor_log"
 mkswap -f "$dev"
 swapon -p "$priority" "$dev"

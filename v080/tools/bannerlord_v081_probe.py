@@ -18,6 +18,13 @@ import time
 from datetime import datetime
 from statistics import median
 
+# The v0.7 game probe already recognizes Proton's high-RSS "Starter"
+# host, which v0.8.1 previously misclassified as a launcher-only process.
+# Reuse the established classifier instead of maintaining two conflicting
+# lists of process names.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "v070" / "tools"))
+from find_bannerlord import entries as find_game_entries, find_game_pid
+
 MIB = 1024 * 1024
 PROC = Path("/proc")
 GPU_DIR = Path("/sys/bus/pci/devices")
@@ -33,29 +40,15 @@ def active_gpu_swap() -> bool:
 
 
 def bannerlord_process() -> dict | None:
-    candidates = []
-    for entry in PROC.iterdir():
-        if not entry.name.isdecimal():
-            continue
-        try:
-            comm = (entry / "comm").read_text().strip().lower()
-            cmd = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace").lower()
-            # Match the actual Wine game executable, not SteamLaunch,
-            # Proton wrappers or the separate TaleWorlds launcher.
-            if "launcher" in comm or not (
-                comm.startswith("bannerlord")
-                or comm.startswith("taleworlds.mount")
-            ):
-                continue
-            if "launcher.exe" in cmd and "bannerlord.native" not in cmd:
-                continue
-            status = (entry / "status").read_text()
-            rss_match = re.search(r"^VmRSS:\s+(\d+) kB", status, re.M)
-            rss_mib = round(int(rss_match.group(1)) / 1024) if rss_match else 0
-            candidates.append({"pid": int(entry.name), "comm": comm, "rss_mib": rss_mib})
-        except (OSError, ValueError):
-            continue
-    return max(candidates, key=lambda p: p["rss_mib"]) if candidates else None
+    # Reuse the established v0.7 detection, including Proton's "Starter"
+    # host only when the launcher path and >=512 MiB RSS are verified.
+    try:
+        pid = find_game_pid(PROC)
+        found = next(item for item in find_game_entries(PROC) if item[0] == pid)
+    except (OSError, ValueError, StopIteration):
+        return None
+    _, rss_kib, process = found
+    return {"pid": pid, "comm": process, "rss_mib": round(rss_kib / 1024)}
 
 
 def amd_gpu_vram() -> dict:
