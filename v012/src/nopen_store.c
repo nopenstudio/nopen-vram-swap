@@ -131,7 +131,7 @@ static int open_opencl(nopen_store *s,size_t bytes) {
         }
         fprintf(stderr,"NOPEN_VRAM_DIRECT_PREFILL_PASS segments=%zu"
                        " bytes=%zu gpu_write_completed=YES"
-                       " pinned_physical_vram=UNPROVEN\\n",s->seg_count,bytes);
+                       " pinned_physical_vram=UNPROVEN\n",s->seg_count,bytes);
     }
     /* Alpha.2 opt-in pinned-host experiment. NOT enabled for normal swap
      * traffic, and never silently falls back to RAM-only OpenCL devices.
