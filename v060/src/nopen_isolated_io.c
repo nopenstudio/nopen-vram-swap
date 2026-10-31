@@ -35,6 +35,23 @@ static uint64_t monotonic_ms(void) {
     if(clock_gettime(CLOCK_MONOTONIC,&t)!=0)return 0;
     return (uint64_t)t.tv_sec*1000u+(uint64_t)t.tv_nsec/1000000u;
 }
+/* Issue #10 diagnostics. Disabled unless explicitly opted in. No page contents. */
+static int diag_trace_enabled(void) {
+    const char *v=getenv("NOPEN_DIAG_IO_TRACE");
+    return v && strcmp(v,"1")==0;
+}
+static void diag_ipc(nopen_isolated_io *r,const char *phase,
+                     uint32_t op,uint64_t off,size_t bytes,
+                     const char *stage,int rc,uint64_t elapsed_ms) {
+    if(!diag_trace_enabled())return;
+    fprintf(stderr,"NOPEN_DIAG_IPC phase=%s t_ms=%" PRIu64
+            " worker_pid=%ld op=%s offset=%" PRIu64
+            " bytes=%zu stage=%s rc=%d elapsed_ms=%" PRIu64 "\n",
+            phase,monotonic_ms(),(long)r->pid,
+            op==NOPEN_IPC_READ?"READ":op==NOPEN_IPC_WRITE?"WRITE":"OTHER",
+            off,bytes,stage,rc,elapsed_ms);
+    fflush(stderr);
+}
 static int io_wait(int fd,short events,uint64_t deadline) {
     for(;;) {
         uint64_t now=monotonic_ms();
@@ -187,7 +204,9 @@ static int transfer(nopen_isolated_io *r,uint32_t op,uint64_t off,
         pthread_mutex_unlock(&r->lock);
         return -EIO;
     }
-    uint64_t deadline=monotonic_ms()+r->timeout_ms;
+    const uint64_t begin_ms=monotonic_ms();
+    diag_ipc(r,"BEGIN",op,off,bytes,"dispatch",0,0);
+    uint64_t deadline=begin_ms+r->timeout_ms;
     nopen_ipc_msg req={NOPEN_IPC_MAGIC,op,off,(uint32_t)bytes,0,
                          op==NOPEN_IPC_WRITE?nopen_page_checksum(src,bytes):0};
     const char *stage="send_header";
@@ -221,6 +240,9 @@ static int transfer(nopen_isolated_io *r,uint32_t op,uint64_t off,
         }
         if(!rc)memcpy(dest,r->staging,bytes);
     }
+    /* Log before fail_io terminates the worker, or completion returns. */
+    diag_ipc(r,rc?"FAIL":"END",op,off,bytes,
+             rc?stage:"complete",rc,monotonic_ms()-begin_ms);
     if(rc)rc=fail_io(r,rc,op,off,bytes,stage);
     else r->stats.operations++;
     pthread_mutex_unlock(&r->lock);
