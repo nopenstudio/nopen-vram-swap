@@ -104,6 +104,35 @@ static int open_opencl(nopen_store *s,size_t bytes) {
         if(rc!=CL_SUCCESS||!m)return fail(s,"clCreateBuffer failed (insufficient GPU VRAM?)");
         s->segment[s->seg_count++]=m;
     }
+    /* Physical VRAM-only kernel-SWAP lab opt-in. clCreateBuffer may be
+     * lazily backed by the driver; touch EVERY 256MiB segment BEFORE swap
+     * activation, so basic allocation failures do not first appear under
+     * Linux kernel memory reclaim. This is NOT a residency/pinning guarantee
+     * across gaming GPU memory pressure or device resets. */
+    const char *prefill=getenv("NOPEN_VRAM_DIRECT_PREFILL");
+    if(prefill && strcmp(prefill,"1")==0) {
+        const cl_uint zero=0;
+        for(size_t seg=0;seg<s->seg_count;seg++) {
+            const size_t len=bytes-seg*SEG_BYTES<SEG_BYTES?
+                  bytes-seg*SEG_BYTES:SEG_BYTES;
+            rc=clEnqueueFillBuffer(s->queue,s->segment[seg],
+                                   &zero,sizeof(zero),0,len,0,NULL,NULL);
+            if(rc!=CL_SUCCESS) {
+                snprintf(s->error,sizeof(s->error),
+                         "VRAM direct prefill segment=%zu rc=%d",seg,rc);
+                return -1;
+            }
+        }
+        rc=clFinish(s->queue);
+        if(rc!=CL_SUCCESS) {
+            snprintf(s->error,sizeof(s->error),
+                     "VRAM direct prefill clFinish rc=%d",rc);
+            return -1;
+        }
+        fprintf(stderr,"NOPEN_VRAM_DIRECT_PREFILL_PASS segments=%zu"
+                       " bytes=%zu gpu_write_completed=YES"
+                       " pinned_physical_vram=UNPROVEN\\n",s->seg_count,bytes);
+    }
     /* Alpha.2 opt-in pinned-host experiment. NOT enabled for normal swap
      * traffic, and never silently falls back to RAM-only OpenCL devices.
      * The 4MiB host buffer bounds locked/pinned host memory use. */
