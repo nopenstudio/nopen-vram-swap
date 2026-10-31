@@ -31,6 +31,9 @@ assert 'grep -Fq \'NOPEN_DIAG_UBLK phase=END\'' in src
 assert 'grep -Fq \'NOPEN_DIAG_WORKER phase=GPU_RETURN\'' in src
 assert 'if awk ' in src and "/proc/swaps" in src
 assert "trap 'cleanup $?' EXIT" in src
+assert src.index("owned=1\nsystemd-run") < src.index("    --max_io_buf_bytes 65536"), (
+    "partial systemd-run failure must be cleaned up")
+assert 'systemctl is-failed --quiet "$service"' in src
 assert '"$controller" del -n "$id"' in src
 assert 'systemctl stop "$service"' in src
 assert "ISSUE10_RAW_INTEGRITY_PASS" in src
