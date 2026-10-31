@@ -177,7 +177,8 @@ systemd-run --system --quiet --unit=nopen-v081-direct4g-monitor \
   --property=OOMScoreAdjust=-900 \
   --property="StandardOutput=append:$monitor_log" \
   --property="StandardError=append:$logfile" \
-  /usr/bin/python3 -u "$repo/v080/tools/v081_direct4g_telemetry.py"
+  /usr/bin/python3 -u "$repo/v080/tools/v081_direct4g_telemetry.py" \
+    --output-file "$monitor_log"
 echo "V081_DIRECT4G_MONITOR_STARTED logfile=$monitor_log"
 mkswap -f "$dev"
 swapon -p "$priority" "$dev"
