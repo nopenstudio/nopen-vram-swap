@@ -119,6 +119,28 @@ int main(int argc,char **argv) {
             while(nanosleep(&sleep_time,&sleep_time)<0 && errno==EINTR){}
             break; /* Parent should have reached timeout and terminated us. */
         }
+        /* v0.8.4: MODEL ONLY. A mock read/write can stall while the
+         * worker is still alive, simulating a dependency on a hypothetical
+         * unavailable host-memory allocation. No memory pressure is induced,
+         * no actual page fault is forced and NO OpenCL mode can enter here.
+         * The parent must independently time out its normal I/O request. */
+        if(backend==NOPEN_STORE_MOCK &&
+           (msg.op==NOPEN_IPC_READ || msg.op==NOPEN_IPC_WRITE)) {
+            const char *wait=getenv("NOPEN_V084_MOCK_WAIT_ON_RECLAIM");
+            const int selected=wait &&
+                ((msg.op==NOPEN_IPC_READ && strcmp(wait,"read")==0) ||
+                 (msg.op==NOPEN_IPC_WRITE && strcmp(wait,"write")==0));
+            if(selected) {
+                fprintf(stderr,"V084_MOCK_RECLAIM_WAIT worker_alive=YES"
+                               " synthetic_dependency=YES op=%s"
+                               " actual_reclaim=NO gpu=NO\\n",
+                        msg.op==NOPEN_IPC_READ?"READ":"WRITE");
+                fflush(stderr);
+                struct timespec hold={.tv_sec=10,.tv_nsec=0};
+                while(nanosleep(&hold,&hold)<0 && errno==EINTR){}
+                break; /* test expects parent timeout and fail-closed */
+            }
+        }
         const int invalid=msg.bytes==0 ||
                           (msg.bytes%NOPEN_PAGE_SIZE)!=0 ||
                           (msg.offset%NOPEN_PAGE_SIZE)!=0;
