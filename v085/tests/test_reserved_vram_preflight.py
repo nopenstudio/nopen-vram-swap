@@ -41,7 +41,7 @@ with TemporaryDirectory() as tmp:
     r = Path(tmp)
     p, m, s = fixture(r)
     ok = mod.evaluate(p, m, s)
-    assert ok["status"] == "USERSpace_EXPERIMENT_ELIGIBLE", ok
+    assert ok["status"] == "USERSPACE_EXPERIMENT_ELIGIBLE", ok
     assert ok["requested_pool_mib"] == 4096
     assert ok["hypothetical_after_pool_mib"] == 12208
     assert ok["free_after_pool_mib"] == 11788
@@ -74,7 +74,7 @@ with TemporaryDirectory() as tmp:
         (second / key).write_text((p / "0000:03:00.0" / key).read_text())
     assert "VRAM_PROBE_FAILED" in mod.evaluate(p,m,s)["reasons"]
     explicit = mod.evaluate(p,m,s,pci="0000:03:00.0")
-    assert explicit["status"] == "USERSpace_EXPERIMENT_ELIGIBLE"
+    assert explicit["status"] == "USERSPACE_EXPERIMENT_ELIGIBLE"
     assert "HEADROOM_BELOW_V085_POLICY_MINIMUM" in mod.evaluate(
         p,m,s,min_free_mib=1024)["reasons"]
     assert "UNSUPPORTED_POOL_SIZE" in mod.evaluate(p,m,s,pool_mib=320)["reasons"]
