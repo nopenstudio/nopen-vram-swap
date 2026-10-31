@@ -109,6 +109,13 @@ cleanup() {
   fi
   rm -rf -- "$tmpdir"
   if (( result == 0 ));then
+    if [[ -e "$dev" || -e /dev/ublkc23 ]] ||
+       systemctl is-active --quiet "$service";then
+      echo "ISSUE10_RAW_CLEANUP_INCOMPLETE device or service still present" >&2
+      result=82
+    fi
+  fi
+  if (( result == 0 ));then
     echo "ISSUE10_RAW_DONE device_removed=YES service_stopped=YES kernel_swap=NO zram_untouched=YES log=$logfile"
   else
     echo "ISSUE10_RAW_FAILED rc=$result log=$logfile" >&2
@@ -173,6 +180,9 @@ for page in 0 32768 65535;do
 done
 if ! grep -Fq 'NOPEN_DIAG_UBLK phase=BEGIN' "$logfile" ||
    ! grep -Fq 'NOPEN_DIAG_UBLK phase=END' "$logfile" ||
+   ! grep -Fq 'NOPEN_DIAG_IPC phase=BEGIN' "$logfile" ||
+   ! grep -Fq 'NOPEN_DIAG_IPC phase=END' "$logfile" ||
+   ! grep -Fq 'NOPEN_DIAG_WORKER phase=GPU_ENTER' "$logfile" ||
    ! grep -Fq 'NOPEN_DIAG_WORKER phase=GPU_RETURN' "$logfile";then
   echo "ISSUE10_RAW_REFUSED incomplete ublk/worker trace" >&2
   tail -n 100 "$logfile" >&2
