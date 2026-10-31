@@ -4,7 +4,9 @@ Logs basic /proc/swaps, VRAM/GTT, MemAvailable. Never edits host storage.
 Does not claim to identify every GPU driver hang.
 """
 from __future__ import annotations
+import argparse
 import json
+import os
 from pathlib import Path
 import time
 import sys
@@ -59,15 +61,41 @@ def gpu() -> list:
     return entries
 
 def main() -> int:
-    interval=1.0
-    for index in range(900):
-        row={"schema":"NOPEN_V081_DIRECT4G_TELEMETRY",
-             "wall_utc":datetime.now(timezone.utc).isoformat(),
-             "mono":round(time.monotonic(),3),
-             "sample":index,
-             "mem":mem(),"swap":swaps(),"gpu":gpu()}
-        print(json.dumps(row,separators=(",",":")),flush=True)
-        if index<899: time.sleep(interval)
+    parser=argparse.ArgumentParser(description="Read-only Nopen swap/GPU telemetry")
+    parser.add_argument("--output-file", type=Path, default=None,
+                        help="Existing absolute log file; durable fsync each sample")
+    parser.add_argument("--samples",type=int,default=900)
+    parser.add_argument("--interval",type=float,default=1.0)
+    args=parser.parse_args()
+    if args.samples<1 or args.samples>900 or args.interval<0.0 or args.interval>60.0:
+        parser.error("samples must be 1..900; interval must be 0..60 seconds")
+    if args.output_file is not None and (
+        not args.output_file.is_absolute() or not args.output_file.is_file()):
+        parser.error("--output-file must name an existing absolute regular file")
+    stream=None
+    try:
+        if args.output_file is not None:
+            stream=args.output_file.open("a",encoding="utf-8",buffering=1)
+        for index in range(args.samples):
+            row={"schema":"NOPEN_V081_DIRECT4G_TELEMETRY",
+                 "wall_utc":datetime.now(timezone.utc).isoformat(),
+                 "mono":round(time.monotonic(),3),
+                 "sample":index,
+                 "mem":mem(),"swap":swaps(),"gpu":gpu()}
+            encoded=json.dumps(row,separators=(",",":"))
+            if stream is None:
+                print(encoded,flush=True)
+            else:
+                stream.write(encoded+"\\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            if index+1<args.samples: time.sleep(args.interval)
+    except OSError as exc:
+        print(f"NOPEN_V081_MONITOR_IO_FATAL {type(exc).__name__}: {exc}",
+              file=sys.stderr,flush=True)
+        return 4
+    finally:
+        if stream is not None: stream.close()
     return 0
 
 if __name__=="__main__":
