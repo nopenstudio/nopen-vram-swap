@@ -21,6 +21,10 @@ jobs:
         run: cmake --build build-issue10 --parallel 2
       - name: Validate trace BEGIN/END, GPU worker phases and injected timeout
         run: ctest --test-dir build-issue10 -R v060_issue10_trace_mock_only --output-on-failure
+      - name: Guard against game-mode CTest under RAM pressure
+        run: |
+          bash -n v080/tools/run_v081_bannerlord.sh
+          python3 v080/tests/test_v081_runner_game_gate.py
       - name: Validate read-only audit and fsynced telemetry file
         run: |
           python3 -m py_compile v080/tools/issue10_next_swap_readiness.py
