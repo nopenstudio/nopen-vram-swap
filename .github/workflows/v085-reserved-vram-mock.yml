@@ -1,4 +1,4 @@
-name: "v0.8.5 Reserved VRAM feasibility (read-only; no kernel SWAP)"
+name: "v0.8.5 Reserved VRAM & bounded holder (CI mock-only)"
 
 on:
   push:
@@ -21,6 +21,8 @@ jobs:
         run: cmake --build build-v085-mock --parallel 2
       - name: Test hypothetical boot reservation budgets and monitoring
         run: ctest --test-dir build-v085-mock -R '^v085_' --output-on-failure
+      - name: Verify mock holder integrity and reject unsafe GPU requests
+        run: ctest --test-dir build-v085-mock -R '^v085_holder_' --output-on-failure
       - name: Preserve v084 synthetic reclaim-stall tests
         run: ctest --test-dir build-v085-mock -R '^v084_' --output-on-failure
       - name: Preserve v083 fault matrix
@@ -28,4 +30,4 @@ jobs:
       - name: No swap/pinning claims in read-only preflight
         run: |
           python3 v085/tests/test_v085_safety_contract.py
-          echo V085_RESERVED_CI_PASS device_capacity_unchanged=YES gpu_pin=UNPROVEN kernel_swap=BLOCKED
+          echo V085_RESERVED_CI_PASS device_capacity_unchanged=YES gpu_pin=UNPROVEN kernel_swap=BLOCKED holder_gpu_on_CI=NO
