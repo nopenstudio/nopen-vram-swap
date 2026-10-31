@@ -69,13 +69,13 @@ int nopen_blk_open(nopen_blk_backend **out,nopen_backend backend,size_t mib) {
     if(geteuid()==0 && prefill && strcmp(prefill,"1")==0) {
         if(mlock(b->meta,b->pages*sizeof(*b->meta))!=0 ||
            mlock(b->staging,NOPEN_BLK_MAX_BYTES)!=0) {
-            fprintf(stderr,"NOPEN_DIRECT_METADATA_MLOCK_REFUSED errno=%d\\n",errno);
+            fprintf(stderr,"NOPEN_DIRECT_METADATA_MLOCK_REFUSED errno=%d\n",errno);
             nopen_store_close(b->store);
             pthread_mutex_destroy(&b->lock);
             free(b->staging);free(b->meta);free(b);
             return -ENOMEM;
         }
-        fprintf(stderr,"NOPEN_DIRECT_METADATA_MLOCK_PASS pages=%zu\\n",b->pages);
+        fprintf(stderr,"NOPEN_DIRECT_METADATA_MLOCK_PASS pages=%zu\n",b->pages);
     }
     b->last_error="ok";
     *out=b;
