@@ -50,12 +50,14 @@ with tempfile.TemporaryDirectory(prefix="nopen-v081-fixture-") as root:
     (proc / "103" / "status").write_text("VmRSS: 2625492 kB\n")
     assert m.bannerlord_process()["pid"] == 101, "explicit exe not preferred"
     (proc / "101" / "comm").write_text("NotGame\n")
+    (proc / "101" / "cmdline").write_bytes(b"/usr/bin/notgame\0")
     starter = m.bannerlord_process()
     assert starter and starter["pid"] == 103 and starter["rss_mib"] > 2000, (
         "Proton Starter game host was not recognized")
     (proc / "103" / "status").write_text("VmRSS: 43000 kB\n")
     assert m.bannerlord_process() is None, "small launcher falsely detected"
     (proc / "101" / "comm").write_text("Bannerlord.Native\n")
+    (proc / "101" / "cmdline").write_bytes(b"Bannerlord.Native.exe\0")
 
     gpu = r / "gpu"
     m.GPU_DIR = gpu
