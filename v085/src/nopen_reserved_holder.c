@@ -281,8 +281,8 @@ int main(int argc,char **argv) {
     }
     free(src);free(got);
     if(rc==0)
-        puts("V085_HOLDER_PASS integrity=YES pool_released=YES"
-             " physical_pin=UNPROVEN no_driver_reservation=YES"
+        puts("V085_HOLDER_PASS integrity=YES store_closed=YES"
+             " vram_released_confirmed=NO physical_pin=UNPROVEN no_driver_reservation=YES"
              " no_kernel_swap=YES");
     return rc;
 }
