@@ -1,65 +1,65 @@
-> **Güncel deneysel geliştirme v0.6.0-dev:** [GPU kaybında fail-closed, CPU mirror ve kontrollü OOM testleri](v060/README_TR.md). Gerçek Linux global SWAP henüz etkin değil; ilk kararlı sürüm v1.0 olacaktır.
+# Nopen VRAM SWAP
 
----
+**Linux ve gelecekteki NopenOS için AMD GPU belleği araştırma projesi.**  
+**Güncel geliştirme: v0.8.5 Reserved VRAM. Henüz kullanılabilir bir gerçek kernel SWAP ürünü değil.**
 
-> **Güncel deneysel geliştirme: v0.5.0-dev.** [Linux-zen VM bellek baskısı sensörü ve güvenli entegrasyon kapıları](v050/README_TR.md). İlk adım yalnızca salt okunur gözlem ve bağımsız C11 politikasıdır; çekirdekte SWAP etkin değildir. İlk kararlı sürüm v1.0 olacaktır.
+[English](README.md) · [Durum](docs/STATUS.md) · [Mimari](docs/ARCHITECTURE.md) · [Güvenlik](docs/SAFETY.md) · [Kurulum ve test](docs/DEVELOPMENT.md) · [Sürüm geçmişi](docs/RELEASES.md)
 
----
+> **GÜVENLİK: KERNEL_SWAP_BLOCKED.** Eski NBD ve 4 GiB ublk üzerinden etkinleştirilen gerçek SWAP denemeleri ağır hatalara ve tam sistem donmasına yol açtı. Ana bilgisayarında arşivdeki SWAP başlatıcılarını çalıştırma. Mevcut **zram** yapılandırmasını koru.
 
-> **Güncel deneysel geliştirme: v0.4.0-dev.** [64/256/1024 MiB gerçek RAM/VRAM karşılaştırması ve v1.0 güvenlik hedefleri](v040/README_TR.md). Sistem genelinde SWAP henüz yoktur; v1.0 ilk kararlı sürüm olacaktır.
+## Gerçekten neler doğrulandı?
 
----
+| Alan | Başarı | Kanıtlanmayan |
+|---|---|---|
+| OpenCL GPU deposu | RX 9060 XT'de 1 GiB alanın tamamına yazma/okuma PASS | Fiziksel VRAM sabitlemesi |
+| v0.8.5 Holder | 1 GiB havuz 15 saniye tutuldu, başlangıç/son bütünlük PASS | Kapanış sonrası fiziksel bellek iadesi |
+| VRAM/GTT sayacı | Gerçek AMDGPU sayaçları okundu | Oyunların 12 GiB görmesi |
+| v0.8.4 | Olası reclaim döngüsü modellenip mock IPC denendi | Gerçek kilitlenmenin kök nedeni |
+| v0.8.3 | İşçi çökmesi, zaman aşımı, bozuk mesaj testleri PASS | Gerçek kernel SWAP güvenliği |
+| Issue #10 | 256 MiB ham ublk, 165/165 I/O işlemi PASS | Etkin SWAP testi |
 
-> **Geliştirme dalı v0.3.0-dev:** [Sayfa getirimi, kontrollü prefetch ve v1.0 yol haritası](v030/README_TR.md). Bu hâlâ gerçek sistem SWAP'i değildir; ilk kararlı sürüm yalnızca v1.0 olacaktır.
+**Önemli son gözlem:** 1 GiB Holder öncesinde toplam VRAM kullanımı yaklaşık **763 MiB** idi. Havuz açıkken **1.944–1.957 MiB** ölçüldü. Kapatmanın hemen ardından **1.931 MiB** görünüyordu. Bunun sebebi henüz belli değil; bellek sızıntısı veya donanım düzeyinde pinleme kanıtı değildir. [Tam rapor](docs/reports/2026-10-31-rx9060xt.md).
 
----
+## Klasör yapısı
 
-> **Geliştirme:** [v0.2.0-dev GPU veri yolu ölçümü](v020/README_TR.md) — Alpha.5 son mimari alfa olarak korunur. Bu dal gerçek SWAP değildir; gerçek AMD GPU bant genişliği testi ve bellek ekonomisi kabulü henüz bekleniyor.
+| Klasör | Rolü |
+|---|---|
+| `v085/` | **Güncel:** Reserved VRAM ön kontrolü, sayaç gözlemi ve GPU-only Holder |
+| `v084/`, `v083/` | Bellek döngüsü ve GPU işçisi güvenilirlik testleri |
+| `v080/`, `v070/`, `v060/` | GPU deneyleri, ublk, IPC ve gölge depolama |
+| `v050/` … `v012/` | Tarihsel altyapı; bazı komutlar riskli olabilir |
+| `src/` | Eski isteğe bağlı Vulkan araştırması |
+| `legacy/` | Eski NBD arşivi, **çalıştırmak için değil** |
+| `docs/` | Güncel mimari, güvenlik, rapor ve geliştirme belgeleri |
 
----
+Önceki sürüm klasörlerini silmiyoruz: yeni sürümlerin testleri eski kaynaklara bağlı. Ancak GitHub ana sayfasında artık tek bir **güncel durum** gösteriliyor.
 
-# Nopen VRAM-SWAP — v0.12.0-alpha.5
+## Güvenli derleme ve test
 
-**Yeni özellik:** GNU/Linux bağımlılığı taşımayan saf C11 sayfa politikası + gerçek bellek ekonomisi kıyası (normal RAM ile OpenCL VRAM sayfalayıcısını aynı iş yükünde ölçme).
+Kök CMake, varsayılan olarak gerçek GPU belleği kullanmayan mock testler derler:
 
-**Gerçek donanım dayanağı:** Alpha.4 RX 9060 XT, 100.000 rastgele işlemde 1.024/1.024 son sayfa doğrulaması; p99 120,71 µs; 78.753 çıkarma/77.761 geri alma başarılı.
-
-**Sınır:** Bu sürüm Linux sistem SWAP'i değil. NopenOS henüz yapılmadı. Linux-zen / NopenOS çekirdek entegrasyonu gelecek araştırma; eski NBD SWAP'in kernel panic nedeniyle kullanılması güvenli değil.
-
-[**Alpha.5 test rehberi**](v012/README_ALPHA5_TR.md) · [NopenOS taşınabilirlik tasarımı](v012/docs/PORTABILITY_AND_SWAP_TR.md) · [Gerçek SWAP hedefleri](v012/docs/TRUE_SWAP_ROADMAP_TR.md)
-
----
-
-# Nopen VRAM-SWAP — v0.12.0-alpha.4
-
-**Araştırma hedefi:** NopenOS için güvenli ve gerçekten Linux çekirdeğinin kullanabileceği GPU VRAM destekli SWAP. **Mevcut alpha.4 henüz sistem SWAP'i değildir.**
-
-## Bugüne kadar doğrulananlar
-
-- **v0.12.0-alpha.1:** AMD RX 9060 XT OpenCL + Linux `userfaultfd` ile GPU'dan eksik sayfa geri yükleme doğrulandı.
-- **v0.12.0-alpha.2:** Gerçek GPU'da 1.024 mantıksal sayfa / 32 resident RAM sayfası kotası, 6.144 page-out ve 3.072 page-in, veri bütünlüğü başarılı.
-- **v0.12.0-alpha.3:** Gerçek GPU + fault-driven sayfalayıcı, 512 mantıksal sayfa / 16 resident sayfa, 2.976 çıkarma ve 2.480 geri yükleme, veri bütünlüğü başarılı.
-- **v0.12.0-alpha.4:** Rastgele karışık 4 KiB yazma/okuma, çoklu seed, sıcak/soğuk erişim, tam son doğrulama, p50/p95/p99/max işlem gecikmesi, proses tepe RAM ölçümü, toplam 2 milyon işlem sınırı; gerçek kartın alpha.4 stres sonuçları henüz gerekiyor.
-
-**Önemli:** Önceki OpenCL+NBD üzerinde etkinleştirilen global SWAP, Linux PID1 çöküşüne kadar uzanan kernel panic oluşturdu. Eski NBD scriptlerini **yeniden çalıştırmayın**. Alpha.4'te `/dev/nbd15`, `mkswap`, `swapon`, yeni kernel modülü veya root servisi yoktur.
-
-## Garuda kurulum ve deneme
-
-```bash
-git clone --branch develop/v0.12.0-alpha.4 --single-branch \
-  https://github.com/nopenstudio/nopen-vram-swap.git nopen-v012a4
-cd nopen-v012a4
-cmake -S v012 -B build-v012-a4 -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
-cmake --build build-v012-a4 --parallel
-ctest --test-dir build-v012-a4 --output-on-failure
-swapon --show
-./build-v012-a4/nopen-vram-demand --probe
+```fish
+cmake -S . -B build -DNOPEN_OPENCL=OFF
+cmake --build build --parallel 2
+ctest --test-dir build -R '^v08[345]_' --output-on-failure
 ```
 
-`/dev/nbd15` aktifse testi başlatmayın. İlk gerçek AMD GPU rastgele stres testi için [Alpha.4 Türkçe rehberi](v012/README_ALPHA4_TR.md) içindeki **10.000 işlem/64 MiB** komutunu kullanın. Süre aşımı veya GPU hatası PASS sayılmaz.
+Sadece salt-okunur VRAM/GTT kontrolü:
 
-## NopenOS yolu
+```fish
+python3 v085/tools/reserved_vram_preflight.py --pool-mib 4096
+python3 v085/tools/reserved_vram_observe.py --samples 5 --interval-seconds 1
+```
 
-Kullanıcı alanı belleği ≠ çekirdek global SWAP. Tam ürün için GPU reseti sonrası veri geri kazanımı, çekirdek VM reclaim/deadlock analizi, DMA/yedek kaynak garantileri, VM üzerinde güvenli ilk prototip, ardından ayrı test makinesi ve uzun süreli ölçümler gereklidir. [Gerçek Linux SWAP karar belgesi](v012/docs/TRUE_SWAP_ROADMAP_TR.md).
+`PREFLIGHT_PASS` ifadesi 4 GiB ayırdığımız anlamına gelmez. Gerçek OpenCL Holder ayrı, izin isteyen GPU-only deneyidir; ayrıntılar [v085 rehberinde](v085/README.md).
 
-[Kaynak ve İngilizce README](README.md) · [Deneme geçmişi](docs/RELEASES.md).
+## Sıradaki araştırma
+
+1. Holder kapandığında neden VRAM sayacı hemen eski seviyeye dönmüyor?
+2. AMDGPU sürücüsünde gerçekten korunmuş, tahliye edilmeyen bir VRAM alanı oluşturabilir miyiz?
+3. Kernel bellek baskısı sırasında Nopen I/O yolunun kesin ilerlemesini ve GPU resetinden veri kurtarmayı nasıl sağlarız?
+4. Bu sorunlar çözülmeden **gerçek SWAP açılmayacak**.
+
+[Güncel geliştirme](https://github.com/nopenstudio/nopen-vram-swap/tree/develop/v0.8.5) · [Issue #10](https://github.com/nopenstudio/nopen-vram-swap/issues/10) · [PR #14](https://github.com/nopenstudio/nopen-vram-swap/pull/14)
+
+NopenOS, Linux-zen tabanlı ama kendine özgü ve GNU kullanıcı alanına bağımlı olmayan bir işletim sistemi olarak tasarlanıyor. Mevcut Python ve Linux araçları yalnızca geliştirme/test içindir. **İlk kararlı sürüm henüz yayımlanmadı.**
