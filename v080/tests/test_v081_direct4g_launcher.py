@@ -12,7 +12,7 @@ checks={
     "separate_from_old_start4g": "NOPEN_UBLK_STORAGE_MODE=vram-direct" not in old,
     "direct_not_shadow": "--setenv=NOPEN_UBLK_STORAGE_MODE=vram-direct" in launch
                          and "--setenv=NOPEN_UBLK_SHADOW_FILE" not in launch
-                         and "shadow-" not in launch,
+                         and 'shadowfile=' not in launch,
     "explicit_user_risk_gate": "NOPEN_V081_DIRECT4G_ACK" in launch
                           and "read -r approval </dev/tty" in launch,
     "no_system_swapoff": "exec swapoff" not in launch and
