@@ -26,6 +26,10 @@ int nopen_isolated_stats_get(nopen_isolated_io *ctx,nopen_isolated_stats *out);
 void nopen_isolated_close(nopen_isolated_io *ctx);
 /* Only mock backend; worker injects one deliberate 10s hang for deadline test. */
 int nopen_isolated_inject_hang(nopen_isolated_io *ctx);
+/* v0.8.3 mock-only: worker exits abruptly or returns a corrupted header.
+ * Both MUST permanently fail-closed; neither may be used with OpenCL. */
+int nopen_isolated_inject_crash(nopen_isolated_io *ctx);
+int nopen_isolated_inject_bad_reply(nopen_isolated_io *ctx);
 #ifdef __cplusplus
 }
 #endif

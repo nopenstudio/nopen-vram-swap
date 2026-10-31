@@ -98,7 +98,21 @@ int main(int argc,char **argv) {
         if(recv_all(fd,&msg,sizeof(msg))!=0)break;
         if(msg.magic!=NOPEN_IPC_MAGIC || msg.bytes>NOPEN_BLK_MAX_BYTES ||
            (msg.op!=NOPEN_IPC_READ && msg.op!=NOPEN_IPC_WRITE &&
-            msg.op!=NOPEN_IPC_HANG_TEST_ONLY))break;
+            msg.op!=NOPEN_IPC_HANG_TEST_ONLY &&
+            msg.op!=NOPEN_IPC_EXIT_TEST_ONLY &&
+            msg.op!=NOPEN_IPC_BAD_REPLY_TEST_ONLY))break;
+        /* All fault opcodes are mock-only and are NEVER dispatched to OpenCL.
+         * Only a parent-side mock context can transmit them. */
+        if(msg.op==NOPEN_IPC_EXIT_TEST_ONLY) {
+            if(backend!=NOPEN_STORE_MOCK)break;
+            _exit(79); /* emulate abrupt loss; do not acknowledge request */
+        }
+        if(msg.op==NOPEN_IPC_BAD_REPLY_TEST_ONLY) {
+            if(backend!=NOPEN_STORE_MOCK)break;
+            msg.magic ^= UINT32_C(1);
+            (void)send_all(fd,&msg,sizeof(msg));
+            break; /* deliberately malformed, never reports success */
+        }
         if(msg.op==NOPEN_IPC_HANG_TEST_ONLY) {
             if(backend!=NOPEN_STORE_MOCK)break;
             struct timespec sleep_time={.tv_sec=10,.tv_nsec=0};
