@@ -1,45 +1,32 @@
-# Nopen VRAM-SWAP
+# Nopen VRAM SWAP
 
-**0.10.0-alpha.1 · Vulkan VRAM mapping research · not a working Linux swap replacement**
+**Research project exploring AMD GPU VRAM as an auxiliary memory tier for Linux and the future NopenOS.**
 
-Nopen Studio's research project testing whether dedicated GPU VRAM can serve as a Linux memory backing store. **The active implementation is now Vulkan-only**; OpenCL is not linked, installed, or required by the current CMake project.
+> **Current experimental development: [v0.8.5 Reserved VRAM](https://github.com/nopenstudio/nopen-vram-swap/tree/develop/v0.8.5).** There is **no production-ready VRAM SWAP**. The safety decision is **`KERNEL_SWAP_BLOCKED`**.
 
-## Current version
+[Türkçe](README_TR.md) · [Current experimental code](https://github.com/nopenstudio/nopen-vram-swap/tree/develop/v0.8.5) · [Latest status](https://github.com/nopenstudio/nopen-vram-swap/blob/develop/v0.8.5/docs/STATUS.md) · [Architecture](https://github.com/nopenstudio/nopen-vram-swap/blob/develop/v0.8.5/docs/ARCHITECTURE.md) · [Safety](https://github.com/nopenstudio/nopen-vram-swap/blob/develop/v0.8.5/docs/SAFETY.md) · [Issue #10](https://github.com/nopenstudio/nopen-vram-swap/issues/10)
 
-`nopen-vulkan-probe` selects a discrete Vulkan GPU, prints its memory heaps and types, requires **DEVICE_LOCAL + HOST_VISIBLE** memory, and verifies two rounds of page data via a mapped Vulkan buffer. It does **not** create a block device or enable Linux swap.
+## Where to start
 
-> ⚠️ **Experimental:** Previous OpenCL/NBD swap prototypes froze the desktop and caused cascading SIGBUS process crashes. Vulkan cannot by itself fix the Linux NBD reclaim/deadlock problem. Do not enable swap with historical builds.
+**The default `main` branch preserves the independent early Vulkan probe and historical NBD research archive.** Its root CMake is **not** the latest Nopen build and must not be confused with the current version.
 
-## Build (Garuda / Arch Linux)
+For the actively developed v0.8.5 code:
 
-```bash
-sudo pacman -S --needed cmake gcc vulkan-headers vulkan-icd-loader vulkan-tools vulkan-radeon
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-./build/nopen-vulkan-probe --list
-./build/nopen-vulkan-probe --mib 64 --samples 256
+```sh
+git clone --branch develop/v0.8.5 https://github.com/nopenstudio/nopen-vram-swap.git
+cd nopen-vram-swap
+cmake -S . -B build -DNOPEN_OPENCL=OFF
+cmake --build build --parallel 2
+ctest --test-dir build -R '^(v083_|v084_|v085_|repository_)' --output-on-failure
 ```
 
-The default is a **64 MiB**, non-privileged probe. After inspecting the selected heap and available Vulkan budget, optionally try `--mib 256`, then `--mib 2048` at your own risk. Do **not** attempt a 2 GiB allocation with a game running.
+These commands build only CPU/mock tests, **not kernel SWAP**. For up-to-date technical details, always follow the links above to the development branch. Historical NBD archives, `ublk` swap-lab scripts and kernel SWAP experiments must not be launched on an everyday workstation.
 
-## Structure
+## Results and limits
 
-- `src/`: Vulkan-only implementation, no OpenCL symbols
-- `docs/ARCHITECTURE.md`: Vulkan BAR / memory mapping decision and limits
-- `docs/RELEASES.md`: chronological OpenCL research history and crash warnings
-- `.github/workflows/build.yml`: header/loader installation and CI build, GPU-independent `--help` smoke test
-- `legacy/archives/`: original experimental packages bundled in the downloadable source bundle (not executed or compiled)
+- **Verified:** RX 9060 XT OpenCL tagged 1 GiB read/write; bounded 15-second v0.8.5 Holder with full integrity checks; read-only AMDGPU VRAM/GTT budget monitoring.
+- **Investigating:** VRAM accounting immediately after Holder shutdown. The first observation stayed elevated, and delayed release has not yet been established.
+- **Not implemented:** driver-enforced 4 GiB VRAM reservation; application-visible 12 GiB hard limit; reclaim-independent GPU I/O; guaranteed GPU-reset recovery; safe live kernel SWAP.
+- **Previously unsafe:** 4 GiB GPU-backed kernel SWAP + Bannerlord froze the host. Earlier NBD swap trials also caused severe system failures.
 
-## Roadmap
-
-- `0.10.0-alpha.1`: probe memory types and perform CPU-mapped VRAM verification (**this release**)
-- `0.10.0-alpha.2`: repeated random 4 KiB I/O, validation and latency profiling
-- `0.10.0-beta.1`: optional NBD raw blocks *only after testing*
-- later beta: safe real swap experiments, if a forward-progress model can be demonstrated
-- `1.0.0`: reserved for reliability-qualified release
-
-## Licensing
-
-New Vulkan implementation: MIT, see [LICENSE](LICENSE). Historical archive material should be reviewed separately before redistribution.
-
-[Turkish README](README_TR.md) · [Architecture](docs/ARCHITECTURE.md) · [Releases](docs/RELEASES.md)
+**No stable v1.0 release has been published.** NopenOS is planned as a distinct Linux-zen-based operating system without a GNU userland dependency; current Python/Linux diagnostics are research tools only.

@@ -1,33 +1,30 @@
-# Nopen VRAM-SWAP v0.10.0-alpha.1
+# Nopen VRAM SWAP
 
-**Aktif GPU altyapısı: Vulkan. OpenCL artık aktif kaynak kodunda ve derleme bağımlılıklarında bulunmuyor.**
+**AMD GPU belleğini Linux ve gelecekteki NopenOS için yardımcı bellek katmanı olarak kullanmayı araştıran proje.**
 
-Bu sürüm henüz Linux'a SWAP veya ek RAM sağlamaz. Kullanıcı alanında Vulkan üzerinden ekran kartının `DEVICE_LOCAL | HOST_VISIBLE` bellek türlerini tespit eder, belleği eşler, 4 KiB sayfalara farklı veri desenleri yazar ve iki tur geri okuyarak karşılaştırır.
+> **Güncel deneysel geliştirme: [v0.8.5 Reserved VRAM](https://github.com/nopenstudio/nopen-vram-swap/tree/develop/v0.8.5).** Henüz güvenli, kullanılabilir bir gerçek VRAM SWAP ürünü yok. Güvenlik kararı: **`KERNEL_SWAP_BLOCKED`**.
 
-## Garuda Linux kurulum
+[English](README.md) · [Güncel kod](https://github.com/nopenstudio/nopen-vram-swap/tree/develop/v0.8.5) · [Son durum](https://github.com/nopenstudio/nopen-vram-swap/blob/develop/v0.8.5/docs/STATUS.md) · [Mimari](https://github.com/nopenstudio/nopen-vram-swap/blob/develop/v0.8.5/docs/ARCHITECTURE.md) · [Güvenlik](https://github.com/nopenstudio/nopen-vram-swap/blob/develop/v0.8.5/docs/SAFETY.md) · [Issue #10](https://github.com/nopenstudio/nopen-vram-swap/issues/10)
 
-```bash
-sudo pacman -S --needed cmake gcc vulkan-headers vulkan-icd-loader vulkan-tools vulkan-radeon
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-./build/nopen-vulkan-probe --list
-./build/nopen-vulkan-probe --mib 64 --samples 256
+## Nereden başlamalı?
+
+GitHub'ın varsayılan **`main` dalı eski Vulkan araştırmasını ve NBD arşivlerini koruyor**. Kök CMake dosyası güncel v0.8.5 derlemesi değildir. Güncel gelişmeleri görmek ve güvenli testleri çalıştırmak için:
+
+```fish
+git clone --branch develop/v0.8.5 https://github.com/nopenstudio/nopen-vram-swap.git
+cd nopen-vram-swap
+cmake -S . -B build -DNOPEN_OPENCL=OFF
+cmake --build build --parallel 2
+ctest --test-dir build -R '^(v083_|v084_|v085_|repository_)' --output-on-failure
 ```
 
-**İlk denemeyi yalnızca 64 MiB ile yap.** GPU türü ve bellek bütçesi uygunsa sonradan 256 MiB ve en fazla 2048 MiB deneyebilirsin. Tam oyun yükü altında deneme yapma. `sudo`, `swapon`, `mkswap` ve NBD gerekmez.
+Bu derleme **GPU belleği tahsis etmez ve Linux SWAP açmaz**. Gerçek SWAP deneylerini başlatan eski NBD/`ublk` araçlarını ana bilgisayarında çalıştırma; mevcut zram yapılandırmasını koru.
 
-## Yanlış bir iddiada bulunmuyoruz
+## Şimdiye kadar ne oldu?
 
-- `DEVICE_LOCAL | HOST_VISIBLE`, doğrudan CPU erişilebilir VRAM için adaydır. Bazı GPU/sürücülerde bu tür bulunmayabilir.
-- Vulkan bellek tahsisi RAM kadar hızlı değildir. Özellikle PCIe üzerinden CPU okuması yavaş olabilir.
-- VK_EXT_memory_budget sürücünün bildirdiği tahmini bütçeyi verir; kesin fiziksel GDDR garantisi değildir.
-- OpenCL'de doğruladığımız SWAP-OUT / SWAP-IN sonuçları, **yeni Vulkan backend'inin** henüz kanıtladığı sonuçlar değildir.
-- NBD/SWAP kilitlenmesi çözülmedi. Bilinen çökme tehlikesi sebebiyle bu sürümde hiç etkinleştirilmez.
+- **Başarılı:** RX 9060 XT'de 1 GiB OpenCL veri bütünlüğü ve 15 saniyelik GPU-only Holder doğrulandı.
+- **Araştırılıyor:** Holder kapanınca VRAM sayacı hemen başlangıç seviyesine dönmüyor; neden ve ne zaman düştüğü bilinmiyor.
+- **Henüz yok:** 4 GiB fiziksel VRAM koruması, oyunlara gerçek 12 GiB sınırı, güvenli kernel SWAP ve GPU sıfırlamasından veri kurtarma.
+- **Önemli geçmiş hata:** 4 GiB gerçek GPU-backed SWAP + Bannerlord denemesi sistemi tamamen dondurdu. Eski NBD denemeleri de ağır hatalar oluşturdu.
 
-Tarihî OpenCL paketleri sadece kaynak geçmişini saklamak için indirme paketinde `legacy/archives/` altında yer alır. Eski sürümün swap betiklerini çalıştırma.
-
-## Plan
-
-`alpha.1` Vulkan bellek algılama ve bütünlük; `alpha.2` sayfa gecikme/baskı testleri; `beta.1` güvenli ham blok aygıt prototipi; daha sonra ancak güvenilir ilerleme sağlanırsa gerçek SWAP.
-
-[Architecture](docs/ARCHITECTURE.md) · [Eski sürümler](docs/RELEASES.md) · [LICENSE](LICENSE)
+**İlk kararlı v1.0 sürümü yayımlanmadı.** NopenOS, Linux-zen tabanlı kendine özgü ve GNU kullanıcı alanına bağımlı olmayan sistem olarak planlanıyor. Mevcut Python ve Linux test araçları yalnızca geliştirme içindir.
