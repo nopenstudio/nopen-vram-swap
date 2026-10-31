@@ -3,7 +3,8 @@
 #include <stdint.h>
 #define NOPEN_IPC_MAGIC UINT32_C(0x4e363049)
 enum { NOPEN_IPC_READY=0, NOPEN_IPC_READ=1, NOPEN_IPC_WRITE=2,
-       NOPEN_IPC_HANG_TEST_ONLY=3 };
+       NOPEN_IPC_HANG_TEST_ONLY=3, NOPEN_IPC_EXIT_TEST_ONLY=4,
+       NOPEN_IPC_BAD_REPLY_TEST_ONLY=5 };
 typedef struct {
     uint32_t magic;
     uint32_t op;
