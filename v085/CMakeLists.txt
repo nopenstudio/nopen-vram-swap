@@ -38,3 +38,12 @@ add_test(NAME v085_holder_reject_unsafe_inputs
 set_tests_properties(v085_holder_reject_unsafe_inputs
  PROPERTIES PASS_REGULAR_EXPRESSION "V085_HOLDER_POLICY_PASS"
  TIMEOUT 10)
+
+# v0.8.5 post-Holder debugging: /proc fdinfo parser only, no GPU, root,
+# active swap, process control or debugfs interaction.
+add_test(NAME v085_drm_client_accounting_readonly_fixture
+ COMMAND "${Python3_EXECUTABLE}"
+         "${CMAKE_CURRENT_LIST_DIR}/tests/test_drm_vram_owners.py")
+set_tests_properties(v085_drm_client_accounting_readonly_fixture
+ PROPERTIES PASS_REGULAR_EXPRESSION "V085_DRM_OWNERS_FIXTURE_PASS"
+ TIMEOUT 10)
