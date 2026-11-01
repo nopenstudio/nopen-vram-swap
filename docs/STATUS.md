@@ -6,7 +6,7 @@
 |---|---|---|
 | Real discrete AMD OpenCL storage | PASS | 1 GiB tagged full-arena readback, RX 9060 XT |
 | Real userland 1 GiB Holder | PASS | 15-second open, sampled integrity, full final readback |
-| GPU-memory accounting after close | **OPEN** | VRAM remained elevated immediately after `nopen_store_close`; no delayed observation yet |
+| GPU-memory accounting after close | **PARTIAL** | VRAM remained elevated immediately after `nopen_store_close`; next-day counter returned to normal, but release timing unknown |
 | Preflight VRAM/GTT/RAM counters | PASS | Read-only PCI `0000:03:00.0` |
 | Isolated worker mock reliability | PASS | v0.8.3 test matrix |
 | Reclaim circular dependency model | PASS, *hypothetical* | v0.8.4 synthetic graph and mock stall |
@@ -38,3 +38,22 @@ This is a research diagnostic, not a pinning interface or a full GPU
 allocator inventory; clients may share buffers, and some processes may
 be invisible without permissions. It is safe to run after Holder exit
 without reboot, OpenCL allocation or kernel SWAP.
+
+
+## 2026-11-01: delayed read-only GPU accounting observed
+
+A later 12-sample, five-second-interval read-only diagnostic on the user's
+RX 9060 XT recorded AMDGPU global VRAM usage at 425.727 MiB initially,
+398.570 MiB minimum and 419.723 MiB final; GTT ~60.93–67.04 MiB.
+Previously, immediately after the Holder store-close, global usage remained
+1,931 MiB. This later reading shows the elevated amount was **not still
+accounted for during this later sample**. The observations are many hours
+apart; whether the driver reclaimed resources immediately after process exit,
+after a delay, after other processes exited, or following a reboot is unknown.
+Do not state that GPU-memory release timing is proven.
+
+The `drm_vram_owners.py` tool scanned 317 process directories, skipped
+263 unreadable *fdinfo entries*, found six visible DRM clients, primarily
+Brave 144.555 MiB and Plasma Shell 107.906 MiB. Those are partial,
+potentially shared DRM-client counters rather than the full GPU VRAM tally.
+See [Issue #10 follow-up](https://github.com/nopenstudio/nopen-vram-swap/issues/10).
