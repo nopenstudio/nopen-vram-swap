@@ -209,3 +209,46 @@ Next step is a **single-session** measurement capturing VRAM before,
 during and for multiple samples after the Holder process actually exits.
 `KERNEL_SWAP_BLOCKED` remains in force; do not use boot parameters
 or kernel-swap reactivation to test release behaviour.
+
+
+## Phase B: same-session Holder lifecycle experiment
+
+The next-day observation showed normal GPU-wide VRAM usage at **399–426 MiB**,
+but because hours had elapsed since the previous Holder run, the exact
+release latency remains unknown.
+
+A separate, explicit-opt-in `tools/holder_lifecycle.py` collects
+**before**, **holding**, and **after_exit** AMDGPU VRAM/GTT/MemAvailable
+counters in a single process lifetime. It launches **only** the previously
+built `nopen-v085-reserved-holder` with the existing 1GiB OpenCL ACK
+when separately approved. CPU/mock tests use fake /sys and /proc paths;
+the real OpenCL mode expressly rejects fake sysfs/proc replacements.
+
+Build with the GPU off until starting the explicit experiment:
+
+```sh
+cmake -S v085 -B build-v085-gpu -DCMAKE_BUILD_TYPE=Release -DNOPEN_OPENCL=ON
+cmake --build build-v085-gpu --target nopen-v085-reserved-holder --parallel 2
+```
+
+**Optional real GPU-only experiment**, only with no game running and
+ordinary zram untouched (no sudo, no reboot):
+
+```sh
+python3 -u v085/tools/holder_lifecycle.py \
+  --holder ./build-v085-gpu/nopen-v085-reserved-holder \
+  --backend opencl --pci 0000:03:00.0 \
+  --seconds 15 --post-seconds 30 --interval 1 \
+  --ack I_ACCEPT_1GIB_LIFECYCLE_GPU_ONLY_NO_SWAP
+```
+
+This reports the process-exit boundary and 30 seconds of post-exit
+samples; it never performs kernel SWAP or reserves physical VRAM in
+AMDGPU. All counters are global, and ongoing unrelated graphics
+activity can change them. **Even a return toward baseline is NOT proof
+of an enforced GPU pin or a leak-free driver in all conditions.**
+If an OpenCL driver call wedges, a userland watchdog cannot guarantee
+kernel forward progress or successful process termination. The separate
+older 4GiB kernel-SWAP + Bannerlord host freeze is still unexplained.
+
+The safety gate remains `KERNEL_SWAP_BLOCKED`.
