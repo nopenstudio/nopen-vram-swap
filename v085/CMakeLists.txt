@@ -47,3 +47,12 @@ add_test(NAME v085_drm_client_accounting_readonly_fixture
 set_tests_properties(v085_drm_client_accounting_readonly_fixture
  PROPERTIES PASS_REGULAR_EXPRESSION "V085_DRM_OWNERS_FIXTURE_PASS"
  TIMEOUT 10)
+
+# Hardware-free, real mock Holder child wrapped by a read-only timeline.
+add_test(NAME v085_holder_lifecycle_mock_before_during_after
+ COMMAND "${Python3_EXECUTABLE}"
+         "${CMAKE_CURRENT_LIST_DIR}/tests/test_holder_lifecycle.py"
+         $<TARGET_FILE:nopen-v085-reserved-holder>)
+set_tests_properties(v085_holder_lifecycle_mock_before_during_after
+ PROPERTIES PASS_REGULAR_EXPRESSION "V085_LIFECYCLE_MOCK_PASS"
+ TIMEOUT 15)
