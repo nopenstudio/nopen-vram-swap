@@ -18,7 +18,7 @@
 | v0.8.3 isolated worker | Mock crash/timeout/bad-IPC failures handled fail-closed | Not a kernel reclaim survival proof |
 | Issue #10 raw ublk | 256 MiB, 165/165 I/O requests complete, 3 verified block roundtrips | No kernel SWAP |
 
-**Latest first-party hardware observation:** the v0.8.5 Holder raised global VRAM use from approximately **763 MiB** to **1,944–1,957 MiB** while holding a 1 GiB OpenCL pool. Immediately after closing the store, VRAM use was still **1,931 MiB**. This does **not** yet prove a leak, persistent pinning, or successful physical release. See [measurement log](docs/reports/2026-10-31-rx9060xt.md).
+**Latest first-party hardware observations:** the v0.8.5 Holder raised global VRAM use from approximately **763 MiB** to **1,944–1,957 MiB** while holding a 1 GiB OpenCL pool. Immediately after closing, the counter was **1,931 MiB**, but the next-day read-only series returned to **399–426 MiB**. The elevated reading did not persist; **the time or mechanism of release remains unproven**, because observations were separated by hours and the intervening reboot/process history is unknown. See [measurement log](docs/reports/2026-10-31-rx9060xt.md).
 
 ## Repository map
 
