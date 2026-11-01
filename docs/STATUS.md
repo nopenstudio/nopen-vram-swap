@@ -57,3 +57,15 @@ The `drm_vram_owners.py` tool scanned 317 process directories, skipped
 Brave 144.555 MiB and Plasma Shell 107.906 MiB. Those are partial,
 potentially shared DRM-client counters rather than the full GPU VRAM tally.
 See [Issue #10 follow-up](https://github.com/nopenstudio/nopen-vram-swap/issues/10).
+
+
+## Same-session diagnostic tool is available
+
+The v0.8.5 `tools/holder_lifecycle.py` tool captures two pre-Holder
+samples, at least one while the Holder subprocess runs, and a
+bounded post-process-exit series. It requires exact user acknowledgment,
+allows only a 1GiB OpenCL pool on real sysfs/proc, checks actual VRAM/RAM
+headroom and existing ublk/NBD SWAP, refuses running as root, and does
+not modify swap or boot settings. Its fake-GPU/mocked-child tests run in
+CPU-only CI. Real RX 9060 XT **lifecycle** results are not yet reported;
+this should be the next step if the user opts into another hardware run.
