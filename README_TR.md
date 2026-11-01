@@ -18,7 +18,7 @@
 | v0.8.3 | İşçi çökmesi, zaman aşımı, bozuk mesaj testleri PASS | Gerçek kernel SWAP güvenliği |
 | Issue #10 | 256 MiB ham ublk, 165/165 I/O işlemi PASS | Etkin SWAP testi |
 
-**Önemli son gözlem:** 1 GiB Holder öncesinde toplam VRAM kullanımı yaklaşık **763 MiB** idi. Havuz açıkken **1.944–1.957 MiB** ölçüldü. Kapatmanın hemen ardından **1.931 MiB** görünüyordu. Bunun sebebi henüz belli değil; bellek sızıntısı veya donanım düzeyinde pinleme kanıtı değildir. [Tam rapor](docs/reports/2026-10-31-rx9060xt.md).
+**Son gözlemler:** 1 GiB Holder öncesinde toplam VRAM kullanımı yaklaşık **763 MiB**, havuz açıkken **1.944–1.957 MiB**, hemen sonrasında **1.931 MiB** idi. Ertesi günkü 12 salt-okunur ölçümde ise **399–426 MiB** görüldü. Yüksek kullanım devam etmiyor; ancak aradan saatler geçtiği ve yeniden başlatma/süreç geçmişi bilinmediği için belleğin **ne zaman ve nasıl** serbest kaldığı henüz kanıtlanmadı. [Tam rapor](docs/reports/2026-10-31-rx9060xt.md).
 
 ## Klasör yapısı
 
