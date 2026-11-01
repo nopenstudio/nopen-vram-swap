@@ -61,3 +61,14 @@ The Holder deliberately refuses 4 GiB attempts, unauthorized invocations, insuff
 The active workflows are `.github/workflows/build.yml` (mock/CPU root build plus optional standalone Vulkan) and `.github/workflows/v085-reserved-vram-mock.yml` (current v085/84/83 tests). Historical workflows are preserved as **non-executable references** in `docs/ci-history/`. See [CI index](CI.md).
 
 No stable v1.0 release currently exists.
+
+
+## Optional single-session release-timing measurements
+
+After the post-close discrepancy and next-morning 400–426MiB samples,
+use `v085/tools/holder_lifecycle.py` only after an explicit 1GiB
+GPU-only opt-in. Build the existing `nopen-v085-reserved-holder` with
+`-DNOPEN_OPENCL=ON`, then run the bounded 15-second Holder and
+30-second post-exit observation as documented in
+[`v085/README.md`](../v085/README.md). Normal zram remains enabled.
+This is **not** a kernel-swap, memory pinning or driver partition test.
