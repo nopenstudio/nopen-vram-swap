@@ -193,3 +193,19 @@ accounting difference. The owner tool does not allocate GPU memory,
 alter a process, touch zram or enable kernel SWAP.
 
 Reference: https://docs.kernel.org/gpu/drm-usage-stats.html
+
+
+## Hardware follow-up: next-day accounting
+
+A subsequent user-supplied **read-only** 12-sample observation on the
+RX 9060 XT showed global VRAM utilization near **400–426 MiB**,
+compared with **1,931 MiB immediately after** the earlier 15-second
+Holder run. This does not prove when the extra VRAM was released:
+observations were many hours apart and the intervening process/reboot
+history is unknown. Per-client fdinfo showed six accessible DRM clients,
+with Brave (~144.555MiB) and plasmashell (~107.906MiB) largest.
+
+Next step is a **single-session** measurement capturing VRAM before,
+during and for multiple samples after the Holder process actually exits.
+`KERNEL_SWAP_BLOCKED` remains in force; do not use boot parameters
+or kernel-swap reactivation to test release behaviour.
