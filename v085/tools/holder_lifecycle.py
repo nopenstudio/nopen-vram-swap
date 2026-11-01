@@ -76,7 +76,7 @@ def run_lifecycle(*, gpu, meminfo, swaps, executable, backend, seconds,
                 if time.monotonic() - start > timeout:
                     raise TimeoutError(
                         "Holder exceeded watchdog; GPU-driver completion is NOT guaranteed")
-                sleep(interval)
+                sleep(max(interval, 0.02))
             ret = child.wait()
             log.seek(0)
             for line in log:
