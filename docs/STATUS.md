@@ -29,3 +29,12 @@ See [2026-10-31 RX 9060 XT report](reports/2026-10-31-rx9060xt.md). 1 GiB OpenCL
 Source of record: [GitHub Issue #10](https://github.com/nopenstudio/nopen-vram-swap/issues/10), [v085 README](../v085/README.md), [experimental PR #14](https://github.com/nopenstudio/nopen-vram-swap/pull/14).
 
 This project does not claim any published v1.0 or production-ready VRAM-backed swap.
+
+## 2026-11-01: read-only client visibility diagnostic
+
+Added `v085/tools/drm_vram_owners.py` to distinguish a system-wide
+VRAM count from the subset of **accessible per-client DRM fdinfo**.
+This is a research diagnostic, not a pinning interface or a full GPU
+allocator inventory; clients may share buffers, and some processes may
+be invisible without permissions. It is safe to run after Holder exit
+without reboot, OpenCL allocation or kernel SWAP.
