@@ -1,4 +1,4 @@
-# Nopen VRAM SWAP v0.8.5 | Reserved VRAM (Phase A)
+# Nopen VRAM SWAP v0.8.5 | Reserved VRAM (Phase A/B)
 
 **Development state: read-only budget/observation plus an explicitly opted-in, bounded userspace OpenCL soft holder.**
 **Driver-enforced partitioning, guaranteed VRAM pinning and live kernel SWAP
@@ -156,3 +156,40 @@ remain unsolved.
 The Python utilities are temporary host diagnostics and CI fixtures,
 **not requirements of NopenOS's planned GNU-free operating system**.
 No GNU userspace dependency is imposed on a future native allocator.
+
+## Phase B follow-up: identify visible DRM GPU memory clients
+
+The initial real 1GiB Holder run verified every page but the AMDGPU global
+`mem_info_vram_used` counter stayed above baseline immediately after
+OpenCL store-close. **Do not reboot or create a new GPU allocation just to
+investigate that reading.**
+
+First capture a delayed, **read-only** global-counter series after Holder
+exit (without a game):
+
+```sh
+python3 v085/tools/reserved_vram_observe.py --samples 12 --interval-seconds 5
+```
+
+Then capture **accessible DRM clients**, using the actual PCI device from
+the preflight (RX 9060 XT lab: `0000:03:00.0`):
+
+```sh
+python3 v085/tools/drm_vram_owners.py --pci 0000:03:00.0 --top 12
+```
+
+The owner tool only reads `/proc/<pid>/fdinfo` (DRM standardized usage
+keys), filters for `drm-driver=amdgpu` and that PCI address, and deduplicates
+handles with the same DRM client ID. It reports resident VRAM and GTT
+values **only for readable client records**, and uses the legacy AMDGPU
+`drm-memory-*` alias only when `drm-resident-*` is unavailable. Multiple
+clients can share backing objects and not all processes are visible to
+the current user, so **no sum is an authoritative GPU total**. If the
+Nopen process has already exited, its original DRM client normally will
+no longer be present; that alone does not explain the global counter.
+
+Do not use debugfs GPU-reset or forced-eviction controls to chase an
+accounting difference. The owner tool does not allocate GPU memory,
+alter a process, touch zram or enable kernel SWAP.
+
+Reference: https://docs.kernel.org/gpu/drm-usage-stats.html
