@@ -24,6 +24,16 @@ python3 v085/tools/reserved_vram_observe.py --samples 12 --interval-seconds 5
 
 Hardware counters are global and cannot be uniquely attributed to Nopen. These commands do not allocate VRAM or enable swap.
 
+## Read-only AMDGPU client usage visibility
+
+```sh
+python3 v085/tools/drm_vram_owners.py --pci 0000:03:00.0 --top 12
+```
+
+This command reads available `/proc/<pid>/fdinfo` DRM client data and
+cannot prove ownership of all of the VRAM shown by global counters.
+Avoid `sudo` and do not use GPU debugfs reset/eviction controls.
+
 ## Optional real GPU-only Holder
 
 **Not a system-swap test.** Close games, keep normal zram, do not run as root:
