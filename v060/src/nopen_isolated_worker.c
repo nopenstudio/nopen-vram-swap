@@ -141,6 +141,23 @@ int main(int argc,char **argv) {
                 break; /* test expects parent timeout and fail-closed */
             }
         }
+        /* Dedicated MOCK-only finite latency injection. Unlike the existing
+         * synthetic 10s hang this lets us verify that a queued caller can
+         * time out without killing a still-healthy, later-completing worker.
+         * This path is never entered by the OpenCL backend. */
+        if(backend==NOPEN_STORE_MOCK &&
+           (msg.op==NOPEN_IPC_READ || msg.op==NOPEN_IPC_WRITE)) {
+            const char *mock_delay=getenv("NOPEN_IPC_MOCK_DELAY_MS");
+            if(mock_delay && *mock_delay) {
+                char *end=NULL;
+                errno=0;
+                unsigned long ms=strtoul(mock_delay,&end,10);
+                if(errno || end==mock_delay || *end || ms>2000)break;
+                struct timespec pause={.tv_sec=(time_t)(ms/1000),
+                                       .tv_nsec=(long)(ms%1000)*1000000L};
+                while(nanosleep(&pause,&pause)<0 && errno==EINTR){}
+            }
+        }
         const int invalid=msg.bytes==0 ||
                           (msg.bytes%NOPEN_PAGE_SIZE)!=0 ||
                           (msg.offset%NOPEN_PAGE_SIZE)!=0;
