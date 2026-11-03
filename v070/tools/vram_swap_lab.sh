@@ -34,6 +34,15 @@ usage() {
 }
 is_active() { swapon --noheadings --raw --show=NAME 2>/dev/null | grep -Fxq "$dev"; }
 case "$action" in start|start-pilot|start-4g|stop|status) : ;; *) usage; exit 2 ;; esac
+# IE-01/03/04: ALL physical live kernel swap start paths are suspended until
+# page recovery + reclaim progress + residency acceptance. Even explicit
+# historical risk acknowledgments MUST NOT bypass this fail-closed guard.
+# Keep status/stop for safe cleanup of an existing device.
+case "$action" in
+  start|start-pilot|start-4g)
+    echo "NOPEN_LIVE_KERNEL_SWAP_BLOCKED unresolved_p0=IE03,IE04,IE05,IE06" >&2
+    exit 77;;
+esac
 # Refuse wrong or missing per-capacity authorization BEFORE any privileged
 # operation. Even with authorization, physical GPU SWAP may lock up the host.
 if [[ "$action" == start-4g ]]; then
