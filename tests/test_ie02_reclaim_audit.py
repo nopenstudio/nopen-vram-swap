@@ -86,17 +86,29 @@ if actual["ipc_admission_mode"] == "legacy_unbounded_mutex":
     bounded = ie02.audit_texts(changed)
     assert bounded["source_contract_intact"], bounded["missing_or_reordered"]
     assert bounded["ipc_admission_mode"] == "bounded_trylock_policy"
-assert bounded["reclaim_independence_proven"] is False
+assert actual["reclaim_independence_proven"] is False
 
-# Order is important, not only presence of the two fragments.
+# Source mutation: a READY sent early is NOT acceptable.
 path = "v060/src/nopen_isolated_worker.c"
 changed = dict(texts)
 line = next(ln for ln in changed[path].splitlines()
             if "NOPEN_IPC_READY,0,0," in ln)
-changed[path] = changed[path].replace(line + "\n", "", 1) + "\n" + line + "\n"
+changed[path] = line + "\n" + changed[path].replace(line + "\n", "", 1)
 order_bad = ie02.audit_texts(changed)
 assert order_bad["source_contract_intact"] is False
-assert "worker_ready_precedes_staging_allocation" in order_bad["missing_or_reordered"]
+assert "worker_staging_precedes_ready" in order_bad["missing_or_reordered"]
+
+# Source mutation: moving OpenCL init before mlock is a regression.
+path = "v050/src/nopen_blk_backend.c"
+changed = dict(texts)
+a = changed[path].find("if(mlock(b->meta,")
+b = changed[path].find("if(nopen_store_open(&b->store")
+assert 0 <= a < b
+changed[path] = changed[path][:a] + "nopen_store_open(&b->store" + (
+    changed[path][a:b]
+) + changed[path][b:].replace("nopen_store_open(&b->store", "/* moved */", 1)
+order_bad = ie02.audit_texts(changed)
+assert "gpu_metadata_mlock_precedes_store_open" in order_bad["missing_or_reordered"] or "BLOCK_OPEN_GPU_AFTER_MLOCK" in order_bad["missing_or_reordered"]
 
 # The current development baseline still contains a reachable legacy 4GiB
 # launcher. This is flagged, never exercised by this regression suite.
