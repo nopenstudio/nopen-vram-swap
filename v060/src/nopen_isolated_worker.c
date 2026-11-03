@@ -76,24 +76,48 @@ int main(int argc,char **argv) {
     const int fd=3;
     nopen_blk_backend *b=NULL;
     int open_rc=nopen_blk_open(&b,backend,(size_t)mib);
+    unsigned char *buffer=NULL;
+    int staging_locked=0;
+    /* IE-02 code fix: NEVER tell the parent READY until the I/O buffer
+     * has been allocated, faulted in and (for strict mode) mlocked.
+     * A missing buffer or failed strict mlock is an OPEN error, not an
+     * asynchronous failure of the FIRST acknowledged swap request. */
+    const char *strict=getenv("NOPEN_SWAP_SERVER_STRICT");
+    const char *direct=getenv("NOPEN_VRAM_DIRECT_PREFILL");
+    const int require_lock=(strict && strcmp(strict,"1")==0) ||
+        (geteuid()==0 && direct && strcmp(direct,"1")==0);
+    if(open_rc==0) {
+        buffer=malloc(NOPEN_BLK_MAX_BYTES);
+        if(!buffer)open_rc=-ENOMEM;
+    }
+    if(open_rc==0) {
+        memset(buffer,0,NOPEN_BLK_MAX_BYTES); /* prefault all staging pages */
+        if(mlock(buffer,NOPEN_BLK_MAX_BYTES)==0) {
+            staging_locked=1;
+            if(geteuid()==0)
+                fprintf(stderr,"NOPEN_DIRECT_WORKER_STAGING_MLOCK_PASS bytes=%u\n",
+                        (unsigned)NOPEN_BLK_MAX_BYTES);
+        } else if(require_lock) {
+            fprintf(stderr,"NOPEN_WORKER_NOT_READY reason=staging_mlock errno=%d"
+                           " kernel_swap=BLOCKED\n",errno);
+            open_rc=-ENOMEM;
+        } else {
+            fputs("NOPEN_V070_WARNING worker staging not mlocked;"
+                  " reclaim independence UNPROVEN\n",stderr);
+        }
+    }
     nopen_ipc_msg msg={NOPEN_IPC_MAGIC,NOPEN_IPC_READY,0,0,
                        (int32_t)open_rc,0};
     if(send_all(fd,&msg,sizeof(msg))!=0 || open_rc!=0) {
-        nopen_blk_close(b);return 3;
+        if(staging_locked)munlock(buffer,NOPEN_BLK_MAX_BYTES);
+        free(buffer);
+        nopen_blk_close(b);
+        return 3;
     }
-    unsigned char *buffer=malloc(NOPEN_BLK_MAX_BYTES);
-    if(!buffer){nopen_blk_close(b);return 4;}
-    if(mlock(buffer,NOPEN_BLK_MAX_BYTES)!=0) {
-        const char *direct=getenv("NOPEN_VRAM_DIRECT_PREFILL");
-        if(geteuid()==0 && direct && strcmp(direct,"1")==0) {
-            fprintf(stderr,"NOPEN_DIRECT_WORKER_MLOCK_REFUSED errno=%d\n",errno);
-            free(buffer);nopen_blk_close(b);return 4;
-        }
-        fputs("NOPEN_V070_WARNING worker staging not mlocked; reclaim risk remains\n",stderr);
-    } else if(geteuid()==0) {
-        fprintf(stderr,"NOPEN_DIRECT_WORKER_STAGING_MLOCK_PASS bytes=%u\n",
-                (unsigned)NOPEN_BLK_MAX_BYTES);
-    }
+    fprintf(stderr,"NOPEN_WORKER_READY staging_allocated=YES"
+                   " staging_prefaulted=YES strict_lock=%s"
+                   " driver_reclaim_independent=UNPROVEN\n",
+            require_lock?"YES":"NO");
     for(;;) {
         if(recv_all(fd,&msg,sizeof(msg))!=0)break;
         if(msg.magic!=NOPEN_IPC_MAGIC || msg.bytes>NOPEN_BLK_MAX_BYTES ||
@@ -201,6 +225,7 @@ int main(int argc,char **argv) {
         diag_worker("RESPONSE_SENT",&msg,status,began);
         if(status<0)break; /* No silent fallback after any corrupted I/O. */
     }
+    if(staging_locked)munlock(buffer,NOPEN_BLK_MAX_BYTES);
     free(buffer);
     nopen_blk_close(b);
     close(fd);
