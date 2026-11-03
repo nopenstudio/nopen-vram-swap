@@ -20,7 +20,7 @@
 |---|---|---|---|---|
 | [İE-01](https://github.com/nopenstudio/nopen-vram-swap/issues/19) | P0 | Deadline ve fail-closed semantiği | [PR #17](https://github.com/nopenstudio/nopen-vram-swap/pull/17) mock uygulama taslağı | Tüm I/O girişlerinde deadline doğru, kuyruk reddi worker'a zarar vermez; belirsiz I/O başarılı sayılmaz |
 | [İE-02](https://github.com/nopenstudio/nopen-vram-swap/issues/20) | P0 | Reclaim bağımsızlığı incelemesi | [Analiz raporu / PR #31](https://github.com/nopenstudio/nopen-vram-swap/pull/31) (İE-05 uygulama bekliyor) | Kod/sistem kaynaklı tam wait-for grafiği, lock-GFP-allocation matrisi ve belirsizlikler |
-| [İE-03](https://github.com/nopenstudio/nopen-vram-swap/issues/21) | P0 | ACK verilen sayfaların korunması tasarımı | Açık | Önceden onaylanan veriler için sağlam ACK, authoritative backing ve veri kaybı modeli |
+| [İE-03](https://github.com/nopenstudio/nopen-vram-swap/issues/21) | P0 | ACK verilen sayfaların korunması tasarımı | [ADR-003 taslağı](adr/ADR-003-acknowledged-swap-page-protection.md), review/CI bekleniyor | Önceden onaylanan veriler için sağlam ACK, authoritative backing ve veri kaybı modeli |
 | [İE-04](https://github.com/nopenstudio/nopen-vram-swap/issues/22) | P0 | VRAM residency ve GTT kontrolü | Açık | AMDGPU bellek migrasyonu ölçülür; pin/rezervasyon veya eşdeğer güvenlik kanıtı |
 | [İE-05](https://github.com/nopenstudio/nopen-vram-swap/issues/23) | P0 | Reclaim bağımsız I/O uygulaması | Açık | Reclaim sırasında ublk/IPC/GPU I/O ilerleyebilir; döngüsel bağımlılıklar yok |
 | [İE-06](https://github.com/nopenstudio/nopen-vram-swap/issues/24) | P0 | Worker/GPU arızası kurtarması | Açık | Arıza sonrası ACK sayfalarının doğrulanmış şekilde kurtarılması |
