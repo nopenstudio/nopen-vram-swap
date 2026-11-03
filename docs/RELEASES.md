@@ -1,9 +1,13 @@
 # Research version map
 
+**Next proposed version: v0.9.0 (crash stabilization) is a target, NOT a released, tagged or currently implemented version.** See [10 critical work orders](CRITICAL_WORK_ORDERS_v0.9.md) and [Issue #18](https://github.com/nopenstudio/nopen-vram-swap/issues/18). Work orders and safety gates must close before any version bump or release decision.
+
+
 The directory names reflect several **historically separate experimental tracks**, not a stable monotonic release history.
 
 | Folder/track | Purpose | Status |
 |---|---|---|
+| **v090 (v0.9.0)** | Reserved **future** target for crash stabilization | **NOT CREATED / NOT RELEASED** |
 | **v085 (v0.8.5)** | Reserved VRAM preflight, GPU accounting and 1 GiB bounded Holder | **Active research; no hard reservation or swap** |
 | v084 (v0.8.4) | Hypothetical reclaim dependency cycle and mock stalled requests | Regression tests |
 | v083 (v0.8.3) | Worker crash, timeout, malformed IPC, reclaim audit | Regression tests |
