@@ -15,7 +15,10 @@ extern "C" {
 #include "nopen_recovery.h"
 #include "nopen_isolated_io.h"
 #include "nopen_shadow.h"
+#include "nopen_durable_store.h"
 }
+#include <atomic>
+#include <cstdint>
 #include <cerrno>
 #include <climits>
 #include <cstddef>
@@ -52,6 +55,8 @@ struct NopenTarget {
     nopen_recovery* backing=nullptr;
     nopen_isolated_io* isolated=nullptr;
     nopen_shadow* shadow=nullptr;
+    nopen_durable_store* durable=nullptr;
+    std::atomic<uint64_t> next_txid{0};
 };
 bool isolated_virtual_machine() {
     FILE* f=fopen("/sys/class/dmi/id/product_name","r");
@@ -158,7 +163,9 @@ int open_target(ublksrv_dev* dev,int,int,char**) {
     const char* shadow_path=getenv("NOPEN_UBLK_SHADOW_FILE");
     const char* storage=getenv("NOPEN_UBLK_STORAGE_MODE");
     const bool vram_direct=storage && strcmp(storage,"vram-direct")==0;
-    if(storage && !vram_direct && strcmp(storage,"shadow")!=0) {
+    const bool transactional=storage && strcmp(storage,"transactional-ssd")==0;
+    if(storage && !vram_direct && !transactional &&
+       strcmp(storage,"shadow")!=0) {
         fprintf(stderr,"NOPEN_UBLK_REFUSED unknown storage mode\n");
         delete state;
         return -EINVAL;
@@ -191,7 +198,27 @@ int open_target(ublksrv_dev* dev,int,int,char**) {
                        " kernel_reclaim_forward_progress=UNPROVEN\n");
     }
     int rc=0;
-    if(shadow_path) {
+    if(transactional) {
+        /* IE-03 actual filesystem-backed store, but this ublk adapter is
+         * presently limited to mock-backend raw I/O inside an isolated VM.
+         * There is NO daemon reattach, encryption or reclaim guarantee.
+         * Never let physical GPU swap use this unfinished lifecycle. */
+        const char* epoch=getenv("NOPEN_UBLK_TXN_EPOCH");
+        char* end=nullptr;
+        errno=0;
+        uint64_t token=epoch?strtoull(epoch,&end,10):0;
+        if(!vm_lab || backend!=NOPEN_STORE_MOCK ||
+           capacity_mib>64 || !shadow_path || shadow_path[0]!='/' ||
+           !epoch || errno || end==epoch || *end || token==0) {
+            fprintf(stderr,"NOPEN_TRANSACTIONAL_RAW_REFUSED"
+                           " isolated_mock_vm_only=YES kernel_swap=BLOCKED\n");
+            delete state;
+            return -EPERM;
+        }
+        rc=nopen_durable_open(&state->durable,shadow_path,
+                              static_cast<unsigned>(capacity_mib),
+                              token,1 /* create new, no silent reuse */);
+    } else if(shadow_path) {
         const char* worker=getenv("NOPEN_UBLK_WORKER_BIN");
         if(!worker || worker[0]!='/')rc=-EINVAL;
         else rc=nopen_shadow_open(&state->shadow,backend,capacity_mib,
@@ -234,13 +261,15 @@ void close_target(const ublksrv_dev* dev) {
         nopen_recovery_close(state->backing);
         nopen_isolated_close(state->isolated);
         nopen_shadow_close(state->shadow);
+        nopen_durable_close(state->durable);
         delete state;
     }
 }
 int on_io(const ublksrv_queue* q,const ublk_io_data* io) {
     if(!q || !io || !io->iod) return -EINVAL;
     auto* state=static_cast<NopenTarget*>(q->dev->tgt.tgt_data);
-    if(!state || (!state->backing && !state->isolated && !state->shadow)) {
+    if(!state || (!state->backing && !state->isolated &&
+                  !state->shadow && !state->durable)) {
         ublksrv_complete_io(q,io->tag,-EIO);
         return 0;
     }
@@ -261,12 +290,16 @@ int on_io(const ublksrv_queue* q,const ublk_io_data* io) {
     else if(buf && bytes && bytes<=NOPEN_BLK_MAX_BYTES) {
         switch(op) {
             case UBLK_IO_OP_READ:
-                rc=state->shadow?nopen_shadow_read(state->shadow,offset,buf,bytes):
+                rc=state->durable?nopen_durable_read(state->durable,offset,buf,bytes):
+                   state->shadow?nopen_shadow_read(state->shadow,offset,buf,bytes):
                    state->isolated?nopen_isolated_read(state->isolated,offset,buf,bytes):
                    nopen_recovery_read(state->backing,offset,buf,bytes);
                 break;
             case UBLK_IO_OP_WRITE:
-                rc=state->shadow?nopen_shadow_write(state->shadow,offset,buf,bytes):
+                rc=state->durable?nopen_durable_write(state->durable,
+                             state->next_txid.fetch_add(1,std::memory_order_relaxed)+1,
+                             offset,buf,bytes):
+                   state->shadow?nopen_shadow_write(state->shadow,offset,buf,bytes):
                    state->isolated?nopen_isolated_write(state->isolated,offset,buf,bytes):
                    nopen_recovery_write(state->backing,offset,buf,bytes);
                 break;
