@@ -28,7 +28,7 @@ EVIDENCE = (
      "kernel/userspace",
      "ublk request enters a userspace callback."),
     ("UBLK_AWAITS_BACKING", "v070/experimental/ublk/nopen_ublk_swap_target.cpp",
-     "rc=state->shadow?nopen_shadow_read(", "hot", "blocking",
+     "state->shadow?nopen_shadow_read(", "hot", "blocking",
      "Read dispatch calls the selected backing before completion."),
     ("UBLK_COMPLETION", "v070/experimental/ublk/nopen_ublk_swap_target.cpp",
      "ublksrv_complete_io(q,io->tag,rc==0?static_cast<int>(bytes):rc)",
