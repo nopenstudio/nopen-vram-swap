@@ -234,7 +234,11 @@ int main(int argc,char **argv) {
     double write_us=0,read_us=0;
     for(size_t k=0;k<ops;k++)write_us+=write_latency[k];
     for(size_t k=0;k<reads;k++)read_us+=read_latency[k];
-    if(write_us<=0 || read_us<=0 || !zero_checks || !checksum_checks) {
+    /* An entire 4MiB legacy pool can be covered by the verification
+     * window, so it has NO unwritten page to inspect. 256MiB A1 runs
+     * always have spare unwritten pages and require a zero-page check. */
+    if(write_us<=0 || read_us<=0 || !checksum_checks ||
+       (slots<slots_capacity && !zero_checks)) {
         fputs("NOPEN_VRAM_DIRECT_FAIL phase=invalid_metrics\n",stderr);
         goto end;
     }
