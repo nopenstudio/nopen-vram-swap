@@ -96,6 +96,14 @@ def policy(args: argparse.Namespace, get_euid=os.geteuid) -> dict:
         reasons.append("INVALID_PCI_BDF")
     if args.backend == "opencl" and args.real_opencl_ack != APPROVAL:
         reasons.append("REAL_OPENCL_REQUIRES_EXPLICIT_MANUAL_ACK")
+    if args.backend == "opencl":
+        # F3: v012 nopen_store_open() selects the FIRST AMD discrete GPU,
+        # not the BDF checked here. No signed device_id ↔ PCI binding exists
+        # in this A1 scope. ALWAYS refuse real OpenCL before any allocation.
+        # Fixing discovery belongs to an explicitly authorized core task.
+        reasons.append("OPENCL_DEVICE_PCI_IDENTITY_UNVERIFIED")
+        if args.skip_build:
+            reasons.append("REAL_OPENCL_SKIP_BUILD_FORBIDDEN")
     if args.backend == "opencl" and (
         args.pci_root != Path("/sys/bus/pci/devices") or
         args.meminfo != Path("/proc/meminfo") or
@@ -204,8 +212,10 @@ def record_snapshot(pci_root: Path, meminfo: Path, swaps: Path,
         "pcie_current_link_speed": optional_ascii(gpu / "current_link_speed") or "UNKNOWN",
         "pcie_current_link_width": optional_ascii(gpu / "current_link_width") or "UNKNOWN",
         "bench_pid": parent_pid,
+        "bench_starttime_ticks": parent_start if parent_pid else None,
         "bench_rss_mib": "UNKNOWN",
-        "worker_pid": None, "worker_rss_mib": "UNKNOWN",
+        "worker_pid": None, "worker_starttime_ticks": None,
+        "worker_rss_mib": "UNKNOWN",
         "drm_pid": None, "drm_evidence": "UNKNOWN",
         "drm_resident_vram_mib": "UNKNOWN", "drm_total_vram_mib": "UNKNOWN",
         "drm_resident_gtt_mib": "UNKNOWN", "drm_total_gtt_mib": "UNKNOWN",
@@ -233,6 +243,7 @@ def record_snapshot(pci_root: Path, meminfo: Path, swaps: Path,
         frame["drm_evidence"] = "UNKNOWN_PID_OR_FDINFO"
         return frame
     wrss = proc_status_rss(proc, child)
+    frame["worker_starttime_ticks"] = start
     frame["worker_rss_mib"] = round(wrss / MIB, 3) if wrss is not None else "UNKNOWN"
     frame["drm_pid"] = child
     # Any missing counters / permissions / no DRM client means UNKNOWN,
@@ -282,20 +293,87 @@ def parse_pass(stdout: str, requested_io: int, backend: str) -> dict:
     return attrs
 
 
-def abort_owned_benchmark(process: subprocess.Popen) -> None:
-    """Abort ONLY the process group created for this benchmark."""
-    if process.poll() is not None:
-        return
+def abort_owned_benchmark(process: subprocess.Popen) -> tuple[str, str]:
+    """Reap the owned new-session benchmark AND any worker holding pipes.
+
+    F1: the session leader can already have exited while its direct child
+    remains alive, inherits stdout/stderr, and prevents communicate() EOF.
+    Never decide group cleanup from Popen.poll() alone. The Popen was created
+    with start_new_session=True: its dedicated PGID equals process.pid.
+    TERM once, bound pipe EOF; escalate group KILL on timeout, including when
+    the parent was already reaped. Signal NO unrelated PID or group.
+    """
+    pgid = process.pid  # owned dedicated session, not a global name search
+    if pgid <= 0:
+        raise ValueError("invalid owned process group")
+    if process.poll() is None:
+        try:
+            if os.getpgid(process.pid) != pgid:
+                raise ValueError("refuse cleanup of non-owned process group")
+        except ProcessLookupError:
+            pass  # exited leader; owned PGID cannot be reused while group lives
+
+    def signal_owned(signum: int) -> None:
+        try:
+            os.killpg(pgid, signum)
+        except ProcessLookupError:
+            pass  # group already gone; still collect any open pipe output
+
+    signal_owned(signal.SIGTERM)
     try:
-        os.killpg(process.pid, signal.SIGTERM)
-        process.wait(timeout=2)
-    except (ProcessLookupError, subprocess.TimeoutExpired):
-        if process.poll() is None:
+        return process.communicate(timeout=2)
+    except subprocess.TimeoutExpired:
+        signal_owned(signal.SIGKILL)
+        try:
+            return process.communicate(timeout=2)
+        except subprocess.TimeoutExpired as exc:
+            # Never block indefinitely on inherited pipe FDs.
+            if process.stdout is not None:
+                process.stdout.close()
+            if process.stderr is not None:
+                process.stderr.close()
             try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
+                process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
                 pass
-            process.wait(timeout=2)
+            raise ValueError("owned process group pipe drain did not finish") from exc
+
+
+def assess_drm_coverage(frames: list[dict]) -> dict:
+    """F5: all observed intervals must identify the same parent/worker.
+
+    One valid sample cannot turn unknown / truncated / missing KFD fdinfo
+    into a residency PASS. This is ONLY per-client accounting, not an
+    OpenCL BO identity, migration trace or hardware VRAM pin.
+    """
+    metric_keys = [f"drm_{metric}_{region}_mib"
+                   for metric in ("resident", "total")
+                   for region in ("vram", "gtt")]
+    identities = [(f.get("bench_pid"), f.get("bench_starttime_ticks"),
+                   f.get("worker_pid"), f.get("worker_starttime_ticks"),
+                   f.get("drm_pid")) for f in frames]
+    identity_ok = (len(frames) >= 2 and all(
+        all(x is not None for x in identity) and identity[0] > 0
+        and identity[2] > 0 and identity[2] == identity[4]
+        and identity == identities[0] for identity in identities))
+    complete = sum(
+        f.get("drm_evidence") ==
+        "COMPLETE_CLIENT_COUNTERS_NOT_PHYSICAL_BO_PROOF"
+        and all(isinstance(f.get(k), (int, float)) and f[k] >= 0
+                for k in metric_keys)
+        for f in frames)
+    all_complete = bool(frames) and complete == len(frames)
+    accepted = identity_ok and all_complete
+    return {
+        "samples_total": len(frames),
+        "samples_complete": complete,
+        "all_samples_complete": all_complete,
+        "identity_continuity_confirmed": identity_ok,
+        "acceptance": ("COUNTERS_ONLY_NOT_BO_PIN_PROOF" if accepted
+                       else "BLOCKED_MISSING_DRM_OR_PID_COVERAGE"),
+        "physical_vram_pin_proven": False,
+        "single_bo_migration_proven": False,
+    }
 
 
 def benchmark_once(args: argparse.Namespace, bench: Path, worker: Path,
@@ -338,11 +416,16 @@ def benchmark_once(args: argparse.Namespace, bench: Path, worker: Path,
                 if free_now < MIN_FREE_VRAM_MIB * MIB:
                     raise ValueError("VRAM headroom fell below safety floor")
             time.sleep(0.05)
-        out, err = proc.communicate(timeout=2)
     except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
         error = str(exc)
-        abort_owned_benchmark(proc)
-        out, err = proc.communicate(timeout=2)
+    finally:
+        # F1: always reap the new-session group, even after the parent
+        # exited with code 0 while an orphan worker kept PIPEs open.
+        try:
+            out, err = abort_owned_benchmark(proc)
+        except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+            error = error or f"OWNED_PROCESS_CLEANUP_FAILED: {exc}"
+            out, err = "", ""
     try:
         after = record_snapshot(args.pci_root, args.meminfo, args.swaps_file,
                                 args.proc_root, args.pci, None, None, None)
@@ -357,21 +440,31 @@ def benchmark_once(args: argparse.Namespace, bench: Path, worker: Path,
             error = str(exc)
     elif error is None:
         error = f"benchmark exit status {proc.returncode}"
-    complete = any(frame.get("drm_evidence", "").startswith("COMPLETE_")
-                   for frame in frames)
+    coverage = assess_drm_coverage(frames)
+    benchmark_integrity_pass = (
+        error is None and proc.returncode == 0 and metrics is not None)
+    # A1 real GPU execution is presently blocked by F3. This status remains
+    # conservative if an authorized later task ever adds device binding.
+    status = "PASS" if benchmark_integrity_pass else "FAIL"
+    if args.backend == "opencl" and benchmark_integrity_pass and (
+            coverage["acceptance"].startswith("BLOCKED")):
+        status = "BLOCKED"
+        error = "incomplete worker DRM fdinfo / PID coverage"
     return {
         "io_kib": io_kib, "backend": args.backend,
-        "status": "PASS" if error is None else "FAIL",
+        "status": status,
         "failure": error, "benchmark_returncode": proc.returncode,
-        "allocation_success": error is None,
+        "benchmark_integrity_pass": benchmark_integrity_pass,
+        "opencl_device_pci_identity_verified": False,
         "physical_vram_allocation_proven": False,
         "metrics": metrics if metrics is not None else "UNKNOWN",
         "pre": before, "during": frames[:80], "post": after,
         "monitor_samples": len(frames),
-        "drm_counters_complete_during_benchmark": complete,
-        "residency_measurement_acceptance":
-            ("COUNTERS_ONLY_NOT_PIN_PROOF" if complete
-             else "BLOCKED_MISSING_DRM_RESIDENT_TOTAL_OR_PID"),
+        "monitor_frames_truncated": len(frames) > 80,
+        "drm_coverage": coverage,
+        "drm_counters_complete_during_benchmark":
+            coverage["acceptance"] == "COUNTERS_ONLY_NOT_BO_PIN_PROOF",
+        "residency_measurement_acceptance": coverage["acceptance"],
         "rss_scope": "BENCHMARK_PARENT_AND_ISOLATED_GPU_WORKER",
         "gpu_name": "UNKNOWN_IF_SYSFS_HAS_NO_PRODUCT_NAME",
         "gpu_pressure_and_hot_cold_page_metrics": "UNKNOWN",
