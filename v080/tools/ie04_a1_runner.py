@@ -321,7 +321,12 @@ def abort_owned_benchmark(process: subprocess.Popen) -> tuple[str, str]:
 
     signal_owned(signal.SIGTERM)
     try:
-        return process.communicate(timeout=2)
+        output = process.communicate(timeout=2)
+        # The group may still contain a child that closed BOTH pipes, so
+        # EOF alone is not proof that the owned worker stopped. SIGKILL
+        # only this already-owned new-session group, not arbitrary PIDs.
+        signal_owned(signal.SIGKILL)
+        return output
     except subprocess.TimeoutExpired:
         signal_owned(signal.SIGKILL)
         try:
