@@ -89,6 +89,13 @@ add_test(NAME ie04_a1_safe_256m_gpu_only_mock_guard_and_integrity
 set_tests_properties(ie04_a1_safe_256m_gpu_only_mock_guard_and_integrity
  PROPERTIES PASS_REGULAR_EXPRESSION "IE04_A1_MOCK_GUARD_PASS" TIMEOUT 120)
 
+# IE-04/A1 rework: run the independent F1-F5 negative reproducer
+# (CPU-only orphan subprocess, synthetic sysfs and false-acceptance cases).
+add_test(NAME ie04_a1_rework_f1_f5_negative_cpu_only
+ COMMAND "${Python3_EXECUTABLE}"
+ "${CMAKE_CURRENT_LIST_DIR}/tests/test_ie04_a1_rework.py")
+set_tests_properties(ie04_a1_rework_f1_f5_negative_cpu_only PROPERTIES
+ PASS_REGULAR_EXPRESSION "IE04_A1_REWORK_F1_F5_PASS" TIMEOUT 35)
 add_executable(nopen-v080-gpu-bench src/nopen_gpu_bench.c)
 target_link_libraries(nopen-v080-gpu-bench PRIVATE nopen_vram_store)
 target_compile_options(nopen-v080-gpu-bench PRIVATE -Wall -Wextra -Wpedantic -Werror)
