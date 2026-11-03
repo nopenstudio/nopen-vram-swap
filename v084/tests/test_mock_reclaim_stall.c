@@ -80,6 +80,43 @@ static int test_two_budgets(const char *worker) {
          " gpu_only_recovery=NO kernel_swap=NO");
     return 0;
 }
+/* A busy worker can still succeed: local queue rejection must NOT
+ * invalidate already acknowledged pages or kill the healthy subprocess. */
+static int test_admission_is_nonfatal(const char *worker) {
+    const nopen_isolated_deadline_policy policy={
+        .admission_timeout_ms=35,.io_timeout_ms=1000
+    };
+    nopen_isolated_io *ctx=NULL;
+    CHECK(setenv("NOPEN_IPC_MOCK_DELAY_MS","300",1)==0);
+    CHECK(nopen_isolated_open_with_policy(&ctx,NOPEN_STORE_MOCK,4,
+                                          &policy,worker)==0);
+    CHECK(unsetenv("NOPEN_IPC_MOCK_DELAY_MS")==0);
+    stalled_call first={.ctx=ctx,.result=-999};
+    pthread_t thread;
+    CHECK(pthread_create(&thread,NULL,call_read,&first)==0);
+    struct timespec delay={.tv_sec=0,.tv_nsec=100000000L};
+    while(nanosleep(&delay,&delay)<0 && errno==EINTR){}
+    unsigned char page[PAGE];
+    memset(page,0x7D,sizeof page);
+    const int queued=nopen_isolated_write(ctx,PAGE,page,PAGE);
+    CHECK(queued==-EAGAIN);
+    CHECK(pthread_join(thread,NULL)==0);
+    CHECK(first.result==0);
+    for(size_t i=0;i<sizeof first.dest;i++)CHECK(first.dest[i]==0);
+    nopen_isolated_stats stats={0};
+    CHECK(nopen_isolated_stats_get(ctx,&stats)==0);
+    CHECK(stats.operations==1 && stats.admission_timeouts==1);
+    CHECK(stats.timeouts==0 && stats.io_errors==0 && stats.child_alive==1);
+    /* The admitted operation and a subsequent request still work. */
+    CHECK(nopen_isolated_write(ctx,PAGE,page,PAGE)==0);
+    CHECK(nopen_isolated_stats_get(ctx,&stats)==0);
+    CHECK(stats.operations==2 && stats.child_alive==1);
+    nopen_isolated_close(ctx);
+    puts("V084_ADMISSION_NONFATAL_PASS healthy_worker_retained=YES"
+         " old_ack_data_not_invalidated=YES rejected_write_not_acked=YES"
+         " mock_only=YES kernel_swap=NO");
+    return 0;
+}
 int main(int argc,char **argv) {
     CHECK(argc==2 && argv[1][0]=='/');
     unsigned char source[PAGE],dest[PAGE];
@@ -121,6 +158,7 @@ int main(int argc,char **argv) {
                " elapsed_ms=%llu\n",op,(unsigned long long)elapsed);
     }
     CHECK(test_two_budgets(argv[1])==0);
+    CHECK(test_admission_is_nonfatal(argv[1])==0);
     puts("V084_MOCK_RECLAIM_STALL_PASS worker_alive_before_timeout=YES"
          " synthetic_wait=YES normal_read_write=YES"
          " no_memory_pressure=YES no_gpu=YES no_kernel_swap=YES"
