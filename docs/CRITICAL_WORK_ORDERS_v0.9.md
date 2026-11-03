@@ -1,6 +1,8 @@
 # Çökme Sorunu İçin Kritik İş Emirleri ve Uygulamalar
 **Nopen VRAM SWAP | Stabilizasyon programı | Hedef sürüm: v0.9.0**
 
+**Release status: NOT RELEASED. No v0.9.0 tag or v090 implementation tree exists.**
+
 > **KERNEL_SWAP_BLOCKED.** Bu doküman açık iş emirlerinin kaydıdır. Henüz v0.9.0 kodu, etiketi, sürüm yayını veya gerçek kernel swap için güvenlik onayı yoktur. Linux'taki mevcut zram korunur.
 
 **Resmî ana takip:** [GitHub Issue #18](https://github.com/nopenstudio/nopen-vram-swap/issues/18)  
