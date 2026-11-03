@@ -38,7 +38,8 @@ add_test(NAME ie02_reclaim_source_regression
 set_tests_properties(ie02_reclaim_source_regression PROPERTIES
     PASS_REGULAR_EXPRESSION "IE02_SOURCE_AUDIT_TEST_PASS" TIMEOUT 10)
 
-# IE-03: ACK/generation/replay is a CPU-only policy model, NOT durable storage.
+# IE-03: CPU reference ACK contract and C filesystem-backed COW journal prototype.
+# Neither constitutes a recoverable ublk kernel-swap backend.
 add_test(NAME ie03_ack_generation_contract
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/tests/test_ie03_ack_model.py")
 set_tests_properties(ie03_ack_generation_contract PROPERTIES
