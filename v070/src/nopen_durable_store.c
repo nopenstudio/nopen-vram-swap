@@ -47,6 +47,7 @@ struct nopen_durable_store {
     page_meta *map;
     unsigned char *scratch;
     int poisoned,inject,lock_initialized;
+    int created_data,created_log;
     pthread_mutex_t lock;
 };
 
@@ -211,10 +212,12 @@ int nopen_durable_open(nopen_durable_store **out,const char *base,
                          (create_new?(O_CREAT|O_EXCL):0);
     s->data_fd=open(data_path,file_flags,0600);
     if(s->data_fd<0){rc=-errno;goto fail;}
+    s->created_data=create_new;
     rc=check_fs(s->data_fd);
     if(rc)goto fail;
     s->log_fd=open(log_path,file_flags,0600);
     if(s->log_fd<0){rc=-errno;goto fail;}
+    s->created_log=create_new;
     if(flock(s->log_fd,LOCK_EX|LOCK_NB)!=0){rc=-EBUSY;goto fail;}
     if(create_new) {
         rc=posix_fallocate(s->data_fd,0,(off_t)((uint64_t)mib*2u*MIB));
@@ -255,10 +258,11 @@ int nopen_durable_open(nopen_durable_store **out,const char *base,
             create_new,mib,s->record_count);
     return 0;
 fail:
+    /* Never unlink a preexisting log on O_EXCL failure! */
+    const int remove_log=s->created_log,remove_data=s->created_data;
     nopen_durable_close(s);
-    /* If the first create failed, never expose an incomplete empty backend.
-     * No deletion is performed on an existing recovery candidate. */
-    if(create_new){unlink(log_path);unlink(data_path);}
+    if(remove_log)unlink(log_path);
+    if(remove_data)unlink(data_path);
     return rc;
 }
 static int find_duplicate(nopen_durable_store *s,uint64_t id,
