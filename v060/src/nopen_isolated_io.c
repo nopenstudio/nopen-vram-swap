@@ -124,7 +124,7 @@ static int fail_io(nopen_isolated_io *r,int code,uint32_t op,
         "NOPEN_IPC_FATAL monotonic_ms=%" PRIu64
         " backend=%s worker_pid=%ld op=%s offset=%" PRIu64
         " bytes=%zu stage=%s errno=%d deadline_ms=%u"
-        " fatal_context=YES acknowledged_gpu_only_pages_unrecoverable=YES\n",
+        " fail_closed=YES fatal_context=YES"\n        " no_global_swap_recovery=YES acknowledged_gpu_only_pages_unrecoverable=YES\n",
         monotonic_ms(),r->backend==NOPEN_STORE_OPENCL?"opencl":"mock",
         (long)r->pid,op==NOPEN_IPC_READ?"READ":
         op==NOPEN_IPC_WRITE?"WRITE":"INJECT",offset,bytes,stage,
