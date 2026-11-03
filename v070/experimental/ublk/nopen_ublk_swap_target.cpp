@@ -199,8 +199,17 @@ int open_target(ublksrv_dev* dev,int,int,char**) {
         // This does NOT imply safe forward progress under kernel reclaim.
         const char* worker=getenv("NOPEN_UBLK_WORKER_BIN");
         if(!worker || worker[0]!='/')rc=-EINVAL;
-        else rc=nopen_isolated_open(&state->isolated,backend,capacity_mib,
-                                    2000,worker);
+        else {
+            /* Explicitly separate admission from active IPC completion.
+             * This bounded lab policy cannot recover GPU-only pages after
+             * a dispatched timeout or a GPU reset. Live SWAP remains BLOCKED. */
+            const nopen_isolated_deadline_policy policy={
+                .admission_timeout_ms=5000,
+                .io_timeout_ms=5000
+            };
+            rc=nopen_isolated_open_with_policy(&state->isolated,backend,
+                                                capacity_mib,&policy,worker);
+        }
     }
     if(rc!=0) {
         delete state;
