@@ -7,6 +7,10 @@
 
 > **SAFETY: KERNEL_SWAP_BLOCKED.** Nopen does not currently offer safe system-wide VRAM-backed SWAP. Earlier live NBD and 4 GiB ublk SWAP experiments produced serious failures, including a complete host freeze. Do not enable archived SWAP launchers on your everyday computer. The installed **zram** should be left alone.
 
+## Runtime stabilization patch status
+
+[PR #34](https://github.com/nopenstudio/nopen-vram-swap/pull/34) changes real C/C++ code: bounded IPC admission, READY only after staging preparation, upfront strict host metadata mlock, and hard-blocked legacy live GPU SWAP starts. A real [filesystem-backed dual-slot COW transaction store](v070/src/nopen_durable_store.c) with fdatasync/journal replay is wired to **isolated-VM mock raw ublk only**. No certified ublk daemon reattach, storage encryption, physical BO pin, GPU/driver reclaim progress or recoverable live system swap exists. **KERNEL_SWAP_BLOCKED**.
+
 ## What is verified
 
 | Component | Evidence | Important limitation |
