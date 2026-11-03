@@ -77,6 +77,15 @@ int open_target(ublksrv_dev* dev,int,int,char**) {
         fprintf(stderr,"NOPEN_V070_REFUSED explicit test opt-in required\n");
         return -EPERM;
     }
+    /* The old physical path used to accept a risk string and could create
+     * a real volatile GPU-backed SWAP target. Risk acceptance is not a
+     * technical safety guarantee. Production/physical host is now blocked.
+     * Only the existing explicit ISOLATED VM raw-ublk test route remains. */
+    if(physical_lab) {
+        fprintf(stderr,"NOPEN_LIVE_KERNEL_SWAP_BLOCKED"
+                       " physical_gpu_reclaim_and_ack_safety=UNPROVEN\n");
+        return -EPERM;
+    }
     const char* capacity_text=getenv("NOPEN_V070_CAPACITY_MIB");
     size_t capacity_mib=kDefaultCapacityMiB;
     if(capacity_text) {
