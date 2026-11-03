@@ -7,6 +7,7 @@
  * Every WRITE ACK waits for the GPU write result, never for an SSD write.
  */
 #include "nopen_isolated_io.h"
+#include "nopen_page_core.h"
 #include <errno.h>
 #include <inttypes.h>
 #include <stdint.h>
@@ -48,6 +49,14 @@ static int kernel_gpu_swap_active(void) {
     if(ferror(f))bad=1;
     fclose(f);
     return bad;
+}
+/* Verify the complete payload by bytes AND the normal transport checksum.
+ * Both are CPU-side correctness signals, not proof of physical VRAM pinning. */
+static int verified_equal(const unsigned char *actual,
+                          const unsigned char *expected,size_t bytes) {
+    return nopen_page_checksum(actual,bytes)==
+           nopen_page_checksum(expected,bytes) &&
+           memcmp(actual,expected,bytes)==0;
 }
 static void pattern(unsigned char *p,size_t bytes,size_t op,size_t index) {
     for(size_t j=0;j<bytes;j++)
@@ -107,7 +116,7 @@ int main(int argc,char **argv) {
     double *read_latency=calloc(slots+ops/97u+1u,sizeof(*read_latency));
     nopen_isolated_io *gpu=NULL;
     int result=3;
-    size_t reads=0;
+    size_t reads=0,checksum_checks=0,zero_checks=0;
     if(!expected||!data||!got||!written||!write_latency||!read_latency)
         goto end;
     printf("NOPEN_VRAM_DIRECT_START backend=%s capacity_mib=%zu"
@@ -140,12 +149,13 @@ int main(int argc,char **argv) {
         if(i%97u==0) {
             const double rb=now_us();
             if(nopen_isolated_read(gpu,off,got,block)!=0 ||
-               memcmp(got,expected+index*block,block)!=0) {
+               !verified_equal(got,expected+index*block,block)) {
                 fprintf(stderr,"NOPEN_VRAM_DIRECT_FAIL phase=read_after_write"
                                " op=%zu\n",i);
                 goto end;
             }
             read_latency[reads++]=now_us()-rb;
+            checksum_checks++;
         }
     }
     const double transfer_s=(now_us()-ops_begin)/1e6;
@@ -156,12 +166,13 @@ int main(int argc,char **argv) {
         memset(got,0xA5,block);
         const double begun=now_us();
         if(nopen_isolated_read(gpu,off,got,block)!=0 ||
-           memcmp(got,expected+k*block,block)!=0) {
+           !verified_equal(got,expected+k*block,block)) {
             fprintf(stderr,"NOPEN_VRAM_DIRECT_FAIL phase=verify slot=%zu\n",k);
             goto end;
         }
         read_latency[reads++]=now_us()-begun;
         verified++;
+        checksum_checks++;
     }
     /* A page OUTSIDE our written window must read zero. The worker's
      * per-page metadata enforces zero, not undefined raw GPU bytes. */
@@ -183,6 +194,7 @@ int main(int argc,char **argv) {
             fputs("NOPEN_VRAM_DIRECT_FAIL phase=unwritten_zero\n",stderr);
             goto end;
         }
+        zero_checks++;
     }
     size_t edge_checks=0;
     if(spread) {
@@ -203,12 +215,13 @@ int main(int argc,char **argv) {
                 pattern(data,block,ops+edge_checks,page);
                 if(nopen_isolated_write(gpu,(uint64_t)page*block,data,block)!=0||
                    nopen_isolated_read(gpu,(uint64_t)page*block,got,block)!=0||
-                   memcmp(data,got,block)!=0) {
+                   !verified_equal(got,data,block)) {
                     fprintf(stderr,"NOPEN_VRAM_DIRECT_FAIL phase=segment_edge"
                                    " block=%zu\n",page);
                     goto end;
                 }
                 edge_checks++;
+                checksum_checks++;
             }
         }
     }
@@ -216,24 +229,48 @@ int main(int argc,char **argv) {
     if(nopen_isolated_stats_get(gpu,&status)!=0||
        status.io_errors||status.timeouts||status.child_crashes)
         goto end;
+    /* We calculate IOPS and GiB/s from the measured sum of SERIAL
+     * operation latencies, never from VRAM-only copy bandwidth. */
+    double write_us=0,read_us=0;
+    for(size_t k=0;k<ops;k++)write_us+=write_latency[k];
+    for(size_t k=0;k<reads;k++)read_us+=read_latency[k];
+    if(write_us<=0 || read_us<=0 || !zero_checks || !checksum_checks) {
+        fputs("NOPEN_VRAM_DIRECT_FAIL phase=invalid_metrics\n",stderr);
+        goto end;
+    }
     qsort(write_latency,ops,sizeof(*write_latency),cmp_d);
     qsort(read_latency,reads,sizeof(*read_latency),cmp_d);
     printf("NOPEN_VRAM_DIRECT_PASS backend=%s capacity_mib=%zu io_kib=%zu"
            " operations=%zu verified_slots=%zu"
            " init_s=%.3f transfer_s=%.3f"
-           " write_p50_us=%.2f write_p95_us=%.2f"
-           " read_p50_us=%.2f read_p95_us=%.2f"
+           " write_p50_us=%.2f write_p95_us=%.2f write_p99_us=%.2f"
+           " read_p50_us=%.2f read_p95_us=%.2f read_p99_us=%.2f"
            " effective_write_mib_s=%.2f"
+           " write_mib_s=%.2f read_mib_s=%.2f"
+           " write_iops=%.2f read_iops=%.2f"
+           " read_operations=%zu checksum_verified_reads=%zu"
+           " zero_page_checks=%zu"
            " shadow_file=NONE ssd_write_through=NO"
            " GPU_ACK=YES kernel_swap=NO"
            " spread_across_vram=%s segment_edge_checks=%zu"
-           " full_capacity_bytes_written=NO\n",
+           " full_capacity_bytes_written=NO"
+           " benchmark_data_authority=VRAM_ONLY"
+           " ssd_data_io=NONE physical_vram_pin=UNPROVEN"
+           " evidence_level=%s\n",
            backend==NOPEN_STORE_OPENCL?"opencl":"mock",mib,io_kib,
            ops,verified,init_s,transfer_s,
            write_latency[ops/2u],write_latency[(ops*95u)/100u],
+           write_latency[(ops*99u)/100u],
            read_latency[reads/2u],read_latency[(reads*95u)/100u],
+           read_latency[(reads*99u)/100u],
            (double)(ops*block)/(double)MIB/transfer_s,
-           spread?"YES":"NO",edge_checks);
+           (double)(ops*block)*1.0e6/((double)MIB*write_us),
+           (double)(reads*block)*1.0e6/((double)MIB*read_us),
+           (double)ops*1.0e6/write_us,
+           (double)reads*1.0e6/read_us,
+           reads,checksum_checks,zero_checks,
+           spread?"YES":"NO",edge_checks,
+           backend==NOPEN_STORE_OPENCL?"REAL_OPENCL_NO_SWAP":"MOCK_ONLY");
     result=0;
 end:
     nopen_isolated_close(gpu);
