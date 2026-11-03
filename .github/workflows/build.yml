@@ -20,7 +20,7 @@ jobs:
       - name: Build (no GPU or block devices)
         run: cmake --build build --parallel 2
       - name: Run current and inherited safety checks
-        run: ctest --test-dir build -R '^(v083_|v084_|v085_|repository_)' --output-on-failure
+        run: ctest --test-dir build -R '^(v060_isolated_gpu_process_deadline_and_ipc_checksum|v060_issue10_trace_mock_only|v070_fatal_gpu_ipc_forensic_log|v083_|v084_|v085_|repository_)' --output-on-failure
       - name: Check standalone Vulkan archival contract
         run: python3 tests/static_contract.py
 
