@@ -257,13 +257,14 @@ int nopen_durable_open(nopen_durable_store **out,const char *base,
                    " ublk_recovery=NOT_IMPLEMENTED kernel_swap=BLOCKED\n",
             create_new,mib,s->record_count);
     return 0;
-fail:
+fail: {
     /* Never unlink a preexisting log on O_EXCL failure! */
     const int remove_log=s->created_log,remove_data=s->created_data;
     nopen_durable_close(s);
     if(remove_log)unlink(log_path);
     if(remove_data)unlink(data_path);
     return rc;
+}
 }
 static int find_duplicate(nopen_durable_store *s,uint64_t id,
                           uint64_t first,uint64_t count,uint64_t hash) {
