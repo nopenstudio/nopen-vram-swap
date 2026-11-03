@@ -18,6 +18,10 @@
 | GPU reset / loss of SWAP data recovery | **BLOCKED** | No validated durable fallback |
 | Game-visible 12 GiB hard partition | **NOT IMPLEMENTED** | Driver has not been modified |
 
+## IE-04 in progress: read-only residency/GTT observer
+
+[Report](reports/2026-11-03-ie04-amdgpu-residency-audit.md) / [Issue #22](https://github.com/nopenstudio/nopen-vram-swap/issues/22). v085 global counters and DRM fdinfo can reveal allocation/accounting changes, but **cannot prove a pinned OpenCL BO, exact migration or 4 GiB game VRAM partition**. The new observer records selected PID DRM client resident VRAM/GTT plus global counters without starting GPU workloads. **IE-04 P0 remains OPEN**, real hardware evidence pending; `KERNEL_SWAP_BLOCKED`.
+
 ## Last confirmed hardware test
 
 See [2026-10-31 RX 9060 XT report](reports/2026-10-31-rx9060xt.md). 1 GiB OpenCL readback and Holder PASS, but a PASS here applies to userland storage only. The counter after OpenCL handle close does not establish whether/when memory is released.
