@@ -37,9 +37,9 @@ EVIDENCE = (
     ("UBLK_LIB_API", "v070/experimental/ublk/nopen_ublk_swap_target.cpp",
      ".handle_io_async=on_io,", "init", "blocking",
      "Async API registration does not make this callback nonblocking."),
-    ("IPC_MUTEX", "v060/src/nopen_isolated_io.c",
-     "pthread_mutex_lock(&r->lock);", "hot", "mutex",
-     "Serializes callers; wait for mutex is outside the existing request timer."),
+    ("IPC_TRANSFER_TIMER_START", "v060/src/nopen_isolated_io.c",
+     "const uint64_t begin_ms=monotonic_ms();", "hot", "mutex",
+     "Callers enter a serialized IPC transfer; admission policy is checked below."),
     ("IPC_TIMER", "v060/src/nopen_isolated_io.c",
      "uint64_t deadline=begin_ms+r->timeout_ms;", "hot", "timer",
      "Starts clock AFTER acquiring the IPC mutex on the v0.8.5 baseline."),
@@ -207,10 +207,28 @@ def audit_texts(texts: dict[str, str]) -> dict:
     block_lines = texts.get("v050/src/nopen_blk_backend.c", "").splitlines()
     def first(ls: list[str], mark: str) -> int:
         return next((i for i, line in enumerate(ls, 1) if mark in line), 0)
+    # IE-01 is an independent PR. Support either the baseline's legacy
+    # unbounded mutex admission or its bounded trylock policy once merged.
+    # This audit records which source mode was examined; a refactor must
+    # never silently make source audit tests stale.
+    ipc = "\n".join(ipc_lines)
+    transfer = ipc.split("static int transfer(", 1)[-1].split(
+        "int nopen_isolated_read(", 1)[0]
+    legacy = ("pthread_mutex_lock(&r->lock);" in transfer
+              and transfer.find("pthread_mutex_lock(&r->lock);") <
+                  transfer.find("uint64_t deadline=begin_ms+r->timeout_ms;"))
+    bounded = ("const int admitted=admit(r);" in transfer
+               and "if(admitted)return admitted;" in transfer
+               and "pthread_mutex_trylock(&r->lock)" in ipc
+               and "deadline=start+r->admission_timeout_ms" in ipc
+               and transfer.find("const int admitted=admit(r);") <
+                   transfer.find("uint64_t deadline=begin_ms+r->timeout_ms;"))
+    admission_mode = ("legacy_unbounded_mutex" if legacy and not bounded else
+                      "bounded_trylock_policy" if bounded and not legacy else
+                      "UNRECOGNIZED")
     ordered = {
-        "ipc_mutex_precedes_request_deadline":
-          0 < first(ipc_lines, "pthread_mutex_lock(&r->lock);")
-            < first(ipc_lines, "uint64_t deadline=begin_ms+r->timeout_ms;"),
+        "ipc_admission_precedes_request_deadline":
+          admission_mode != "UNRECOGNIZED",
         "worker_ready_precedes_staging_allocation":
           0 < first(worker_lines, "NOPEN_IPC_READY,0,0,")
             < first(worker_lines, "unsigned char *buffer=malloc(NOPEN_BLK_MAX_BYTES);"),
@@ -227,6 +245,7 @@ def audit_texts(texts: dict[str, str]) -> dict:
         "missing_or_reordered": missing,
         "evidence": evidence,
         "ordering_checks": ordered,
+        "ipc_admission_mode": admission_mode,
         "model_scenarios": model_scenarios(),
         "live_direct4g_launcher_present_on_baseline": direct4g_start_is_routable,
         "unverified_kernel_or_driver_edges": [
