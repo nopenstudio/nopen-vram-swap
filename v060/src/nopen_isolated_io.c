@@ -220,7 +220,16 @@ static int admit(nopen_isolated_io *r) {
     const uint64_t deadline=start+r->admission_timeout_ms;
     for(;;) {
         const int rc=pthread_mutex_trylock(&r->lock);
-        if(rc==0)return 0;
+        if(rc==0) {
+            /* The calling thread may have been descheduled after the
+             * mutex became free; never admit after its monotonic budget. */
+            const uint64_t acquired_at=monotonic_ms();
+            if(acquired_at && acquired_at<deadline)return 0;
+            pthread_mutex_unlock(&r->lock);
+            if(!acquired_at)return -EIO;
+            atomic_fetch_add_explicit(&r->admission_timeouts,1,memory_order_relaxed);
+            return -EAGAIN;
+        }
         if(rc!=EBUSY)return -EIO;
         const uint64_t now=monotonic_ms();
         if(!now)return -EIO;
