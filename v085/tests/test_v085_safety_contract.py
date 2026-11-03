@@ -5,7 +5,7 @@ root = Path(__file__).resolve().parents[2]
 read = lambda p: (root/p).read_text(encoding="utf-8")
 p=read("v085/tools/reserved_vram_preflight.py")
 o=read("v085/tools/reserved_vram_observe.py")
-ci=read(".github/workflows/v085-reserved-vram-mock.yml")
+ci=read(".github/workflows/build.yml")
 for marker in (
     '"application_vram_capacity_modified": False',
     '"driver_vram_partition_created": False',
@@ -29,6 +29,7 @@ for source in (p,o):
         "mkswap ", "modprobe ", "amdgpu.vramlimit=", "systemctl "):
         assert forbidden not in source, forbidden
 assert "NOPEN_OPENCL=OFF" in ci
-assert "ctest --test-dir build-v085-mock -R '^v085_'" in ci
+assert "vulkan_archive_not_built=YES" in ci
+assert "v083_|v084_|v085_" in ci
 print("V085_RESERVED_SAFETY_PASS sysfs_readonly=YES app_vram_cap=UNCHANGED"
       " physical_gpu_pin=UNPROVEN kernel_swap=BLOCKED")
