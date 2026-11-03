@@ -382,6 +382,22 @@ def benchmark_once(args: argparse.Namespace, bench: Path, worker: Path,
                "--capacity-mib", "256", "--io-kib", str(io_kib),
                "--operations", str(args.operations),
                "--spread-across-vram", "--worker", str(worker)]
+    if args.backend == "opencl":
+        # F3/F4 defense-in-depth: even a direct benchmark_once caller cannot
+        # allocate on a worker whose chosen cl_device_id ↔ PCI is unknown.
+        live = policy(args)
+        if live["reasons"]:
+            return {
+                "io_kib": io_kib, "backend": args.backend, "status": "BLOCKED",
+                "failure": "PRESTART_POLICY: " + ",".join(live["reasons"]),
+                "benchmark_integrity_pass": False,
+                "physical_vram_allocation_proven": False,
+                "opencl_device_pci_identity_verified": False,
+                "metrics": "UNKNOWN", "monitor_samples": 0,
+                "drm_counters_complete_during_benchmark": False,
+                "residency_measurement_acceptance": "BLOCKED_NOT_STARTED",
+                "ssd_data_io": "NONE", "safety_gate": "KERNEL_SWAP_BLOCKED",
+            }
     before = record_snapshot(args.pci_root, args.meminfo, args.swaps_file,
                              args.proc_root, args.pci, None, None, None)
     proc = subprocess.Popen(command, cwd=REPO, stdout=subprocess.PIPE,
@@ -477,6 +493,8 @@ def benchmark_once(args: argparse.Namespace, bench: Path, worker: Path,
 def build_once(args: argparse.Namespace) -> tuple[Path, Path]:
     build = args.build_dir.resolve()
     if args.skip_build:
+        if args.backend == "opencl":
+            raise ValueError("REAL_OPENCL_SKIP_BUILD_FORBIDDEN")
         if args.bench_bin is None or args.worker_bin is None:
             raise ValueError("--skip-build requires both --bench-bin and --worker-bin")
         bench, worker = args.bench_bin.resolve(), args.worker_bin.resolve()
@@ -536,22 +554,85 @@ def main(argv: list[str] | None = None, get_euid=os.geteuid) -> int:
         print("IE04_A1_PREFLIGHT_PASS no_benchmark_started=YES"
               " kernel_swap=BLOCKED physical_pin=UNPROVEN")
         return 0
+    def not_started(kib: int, reason: str) -> dict:
+        return {
+            "io_kib": kib, "backend": args.backend, "status": reason,
+            "failure": reason, "metrics": "UNKNOWN",
+            "benchmark_integrity_pass": False,
+            "opencl_device_pci_identity_verified": False,
+            "physical_vram_allocation_proven": False,
+            "monitor_samples": 0,
+            "residency_measurement_acceptance": "BLOCKED_NOT_STARTED",
+            "drm_counters_complete_during_benchmark": False,
+            "ssd_data_io": "NONE", "safety_gate": "KERNEL_SWAP_BLOCKED",
+        }
+
+    runs: list[dict] = []
+    rechecks: list[dict] = []
     try:
         bench, worker = build_once(args)
-        runs = [benchmark_once(args, bench, worker, kib)
-                for kib in decision["requested_io_kib"]]
+        # F4: compilation can take minutes. The initial policy decision is
+        # stale after building. Recheck ALL conditions BEFORE any run.
+        after_build = policy(args, get_euid)
+        rechecks.append({"stage": "AFTER_BUILD",
+                         "reasons": after_build["reasons"]})
+        if after_build["reasons"]:
+            decision["reasons"] = after_build["reasons"]
+            decision["status"] = "BLOCKED"
+            decision["runs"] = [
+                not_started(k, "NOT_STARTED_DUE_TO_PREFLIGHT_FAILURE")
+                for k in decision["requested_io_kib"]
+            ]
+            decision["preflight_rechecks"] = rechecks
+            print(json.dumps(decision, ensure_ascii=False, sort_keys=True))
+            print("IE04_A1_BLOCKED after_build_preflight=REFUSED",
+                  file=sys.stderr)
+            return 3
+        for index, kib in enumerate(decision["requested_io_kib"]):
+            # F4: run2 might start much later than run1. Require fresh PCI,
+            # swap, VRAM headroom, RAM, busy/game and approval every time.
+            fresh = policy(args, get_euid)
+            rechecks.append({"stage": f"BEFORE_{kib}K",
+                             "reasons": fresh["reasons"]})
+            if fresh["reasons"]:
+                decision["reasons"] = fresh["reasons"]
+                runs.extend(
+                    not_started(k, "NOT_STARTED_DUE_TO_PREFLIGHT_FAILURE")
+                    for k in decision["requested_io_kib"][index:]
+                )
+                break
+            run = benchmark_once(args, bench, worker, kib)
+            runs.append(run)
+            if run["status"] != "PASS":
+                # F2: never allocate a new 64KiB workload after a FAIL or
+                # BLOCKED 4KiB run, including missing DRM evidence.
+                runs.extend(
+                    not_started(k, "NOT_STARTED_DUE_TO_PRIOR_FAILURE")
+                    for k in decision["requested_io_kib"][index + 1:]
+                )
+                break
     except (ValueError, OSError, subprocess.CalledProcessError,
             subprocess.TimeoutExpired) as exc:
         print(f"IE04_A1_REFUSED_OR_FAILED reason={exc}", file=sys.stderr)
         return 3
     decision["runs"] = runs
-    decision["status"] = "PASS" if all(r["status"] == "PASS" for r in runs) else "FAIL"
+    decision["preflight_rechecks"] = rechecks
+    decision["status"] = (
+        "PASS" if len(runs) == len(decision["requested_io_kib"]) and
+        all(r["status"] == "PASS" for r in runs)
+        else "BLOCKED" if decision.get("reasons") or any(
+            r["status"] in ("BLOCKED", "NOT_STARTED_DUE_TO_PREFLIGHT_FAILURE")
+            for r in runs)
+        else "FAIL"
+    )
     decision["evidence_level"] = ("MOCK_ONLY" if args.backend == "mock"
-                                 else "REAL_OPENCL_NO_SWAP")
+                                 else "REAL_OPENCL_NO_SWAP_NOT_TESTED")
     decision["residency_acceptance"] = (
         "BLOCKED_MOCK_HAS_NO_PHYSICAL_GPU_EVIDENCE" if args.backend == "mock"
-        else "COUNTERS_ONLY_NOT_BO_PIN_PROOF" if
-        all(r["drm_counters_complete_during_benchmark"] for r in runs)
+        else "COUNTERS_ONLY_NOT_BO_PIN_PROOF"
+        if decision["status"] == "PASS" and all(
+            r.get("residency_measurement_acceptance") ==
+            "COUNTERS_ONLY_NOT_BO_PIN_PROOF" for r in runs)
         else "BLOCKED_DRM_COUNTERS_UNAVAILABLE"
     )
     decision["gpu_name"] = decision["preflight"]["gpu_name"]
@@ -564,7 +645,8 @@ def main(argv: list[str] | None = None, get_euid=os.geteuid) -> int:
           " gpu_pin=UNPROVEN")
     return 0 if decision["status"] == "PASS" and (
         args.backend == "mock" or
-        decision["residency_acceptance"] != "BLOCKED_DRM_COUNTERS_UNAVAILABLE"
+        decision["residency_acceptance"] ==
+        "COUNTERS_ONLY_NOT_BO_PIN_PROOF"
     ) else 4
 
 
