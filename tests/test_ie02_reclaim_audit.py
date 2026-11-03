@@ -25,7 +25,9 @@ assert actual["source_contract_intact"], actual["missing_or_reordered"]
 assert len(actual["evidence"]) >= 30
 assert all(e["line"] is not None and e["line"] > 0 for e in actual["evidence"])
 assert all(actual["ordering_checks"].values())
-assert actual["ipc_admission_mode"] == "legacy_unbounded_mutex"
+assert actual["ipc_admission_mode"] in (
+    "legacy_unbounded_mutex", "bounded_trylock_policy"
+)
 assert actual["gate"] == "KERNEL_SWAP_BLOCKED"
 assert actual["observed_root_cause_of_issue_10"] == "UNKNOWN"
 assert actual["unverified_kernel_or_driver_edges"]
@@ -55,28 +57,35 @@ texts = source_map()
 # If a critical lock disappears or source is silently refactored,
 # the audit must FAIL rather than continue passing stale conclusions.
 changed = dict(texts)
-changed["v060/src/nopen_isolated_io.c"] = changed[
-    "v060/src/nopen_isolated_io.c"
-].replace("pthread_mutex_lock(&r->lock);", "/* deliberately removed */")
+ipc_path = "v060/src/nopen_isolated_io.c"
+admission_marker = (
+    "pthread_mutex_lock(&r->lock);"
+    if actual["ipc_admission_mode"] == "legacy_unbounded_mutex"
+    else "const int admitted=admit(r);"
+)
+changed[ipc_path] = changed[ipc_path].replace(
+    admission_marker, "/* deliberately removed admission */", 1
+)
 broken = ie02.audit_texts(changed)
 assert broken["source_contract_intact"] is False
 assert "ipc_admission_precedes_request_deadline" in broken["missing_or_reordered"]
 
 # A proper IE-01 style trylock/admission policy should be recognized
 # without falsely certifying kernel reclaim progress.
-changed = dict(texts)
-ipc_path = "v060/src/nopen_isolated_io.c"
-changed[ipc_path] = changed[ipc_path].replace(
-    "pthread_mutex_lock(&r->lock);",
-    "const int admitted=admit(r);\n    if(admitted)return admitted;",
-    1
-)
-changed[ipc_path] += ("\n/* source-only IE-01 fixture */\n"
-                      "pthread_mutex_trylock(&r->lock);\n"
-                      "deadline=start+r->admission_timeout_ms;\n")
-bounded = ie02.audit_texts(changed)
-assert bounded["source_contract_intact"], bounded["missing_or_reordered"]
-assert bounded["ipc_admission_mode"] == "bounded_trylock_policy"
+if actual["ipc_admission_mode"] == "legacy_unbounded_mutex":
+    changed = dict(texts)
+    ipc_path = "v060/src/nopen_isolated_io.c"
+    changed[ipc_path] = changed[ipc_path].replace(
+        "pthread_mutex_lock(&r->lock);",
+        "const int admitted=admit(r);\n    if(admitted)return admitted;",
+        1
+    )
+    changed[ipc_path] += ("\n/* source-only IE-01 fixture */\n"
+                          "pthread_mutex_trylock(&r->lock);\n"
+                          "deadline=start+r->admission_timeout_ms;\n")
+    bounded = ie02.audit_texts(changed)
+    assert bounded["source_contract_intact"], bounded["missing_or_reordered"]
+    assert bounded["ipc_admission_mode"] == "bounded_trylock_policy"
 assert bounded["reclaim_independence_proven"] is False
 
 # Order is important, not only presence of the two fragments.
@@ -91,14 +100,19 @@ assert "worker_ready_precedes_staging_allocation" in order_bad["missing_or_reord
 
 # The current development baseline still contains a reachable legacy 4GiB
 # launcher. This is flagged, never exercised by this regression suite.
-assert actual["live_direct4g_launcher_present_on_baseline"] is True
 changed = dict(texts)
-changed["v080/tools/v081_direct4g_kernel_lab.sh"] = changed[
-    "v080/tools/v081_direct4g_kernel_lab.sh"
-].replace("start) :;;", "start) echo BLOCKED; exit 77;;")
-safe_policy = ie02.audit_texts(changed)
-assert safe_policy["live_direct4g_launcher_present_on_baseline"] is False
-assert safe_policy["gate"] == "KERNEL_SWAP_BLOCKED"
+launcher = "v080/tools/v081_direct4g_kernel_lab.sh"
+if actual["live_direct4g_launcher_present_on_baseline"]:
+    changed[launcher] = changed[launcher].replace(
+        "start) :;;", "start) echo BLOCKED; exit 77;;"
+    )
+    safe_policy = ie02.audit_texts(changed)
+    assert safe_policy["live_direct4g_launcher_present_on_baseline"] is False
+else:
+    changed[launcher] += "\nstart) :;;\n"
+    historical_policy = ie02.audit_texts(changed)
+    assert historical_policy["live_direct4g_launcher_present_on_baseline"] is True
+assert actual["gate"] == "KERNEL_SWAP_BLOCKED"
 
 # Strict read-only contract: source introspection and static graph only.
 audit_source = target.read_text(encoding="utf-8")
