@@ -89,8 +89,28 @@ int main(int argc,char **argv) {
     CK(nopen_durable_read(s,0,got,PAGE)==0 && equal(c,got,PAGE));
     nopen_durable_close(s);s=NULL;
 
+    /* Simulate a crash after writing only a PARTIAL trailing journal record.
+     * It was never eligible for WRITE ACK. Reopen trims its tail and retains
+     * every previously ACKed transaction. */
+    int tail_fd=open(logfile,O_RDWR);
+    CK(tail_fd>=0);
+    off_t before=lseek(tail_fd,0,SEEK_END);
+    CK(before>0);
+    const unsigned char torn[]={0x19,0x4b,0x07,0xf8,0x03};
+    CK(write(tail_fd,torn,sizeof torn)==(ssize_t)sizeof torn);
+    CK(fdatasync(tail_fd)==0);
+    close(tail_fd);
+    CK(nopen_durable_open(&s,base,4,epoch,0)==0);
+    CK(nopen_durable_read(s,0,got,PAGE)==0 && equal(c,got,PAGE));
+    nopen_durable_close(s);s=NULL;
+    tail_fd=open(logfile,O_RDONLY);
+    CK(tail_fd>=0);
+    CK(lseek(tail_fd,0,SEEK_END)==before);
+    close(tail_fd);
+
     /* Corrupt current page's committed slot (generation 3 -> slot 0).
      * Reads MUST return failure WITHOUT mutating caller's buffer. */
+    CK(nopen_durable_open(&s,base,4,epoch,0)==0);
     int fd=open(datafile,O_RDWR);
     CK(fd>=0);
     unsigned char byte=0;
@@ -98,6 +118,10 @@ int main(int argc,char **argv) {
     byte^=0xA5;
     CK(pwrite(fd,&byte,1,0)==1 && fdatasync(fd)==0);
     close(fd);
+    memset(got,0xAD,PAGE);
+    CK(nopen_durable_read(s,0,got,PAGE)==-EBADMSG);
+    for(size_t i=0;i<PAGE;i++)CK(got[i]==0xAD);
+    nopen_durable_close(s);s=NULL;
     CK(nopen_durable_open(&s,base,4,epoch,0)==-EBADMSG);
     CK(s==NULL); /* checksum validation during full replay */
 
@@ -105,7 +129,8 @@ int main(int argc,char **argv) {
     unlink(logfile);unlink(datafile);rmdir(directory);
     puts("IE03_DURABLE_C_TEST_PASS"
          " actual_file_fdatasync=YES double_slot_COW=YES"
-         " torn_precommit_old_data=YES lost_ACK_idempotent=YES"
+         " torn_precommit_old_data=YES partial_journal_replay=YES"
+         " lost_ACK_idempotent=YES"
          " multi_page_atomic_manifest=YES boot_epoch=STRICT"
          " corruption_fail_closed=YES kernel_swap=BLOCKED");
     return 0;
