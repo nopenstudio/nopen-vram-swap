@@ -5,6 +5,20 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 option(NOPEN_OPENCL "Require real AMD OpenCL support for the GPU SWAP backend" ON)
 add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../v060" "${CMAKE_CURRENT_BINARY_DIR}/v060")
 find_package(Threads REQUIRED)
+
+# IE-03: actual COW data + fdatasync journal prototype. Storage-only,
+# no ublk, no OpenCL, no kernel SWAP. Built in ordinary mock CI.
+add_library(nopen_durable_store STATIC src/nopen_durable_store.c)
+target_include_directories(nopen_durable_store PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
+target_link_libraries(nopen_durable_store PUBLIC Threads::Threads)
+target_compile_options(nopen_durable_store PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_executable(nopen-test-durable-store tests/test_durable_store.c)
+target_link_libraries(nopen-test-durable-store PRIVATE nopen_durable_store)
+target_compile_options(nopen-test-durable-store PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_test(NAME ie03_durable_store_fs_torn_ack_replay
+ COMMAND nopen-test-durable-store "${CMAKE_CURRENT_BINARY_DIR}")
+set_tests_properties(ie03_durable_store_fs_torn_ack_replay PROPERTIES
+ PASS_REGULAR_EXPRESSION "IE03_DURABLE_C_TEST_PASS" TIMEOUT 30)
 add_library(nopen_shadow STATIC src/nopen_shadow.c)
 target_include_directories(nopen_shadow PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include")
 target_link_libraries(nopen_shadow PUBLIC nopen_isolated_io nopen_page_core Threads::Threads)
