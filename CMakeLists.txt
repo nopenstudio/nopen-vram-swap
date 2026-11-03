@@ -43,3 +43,9 @@ add_test(NAME ie03_ack_generation_contract
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/tests/test_ie03_ack_model.py")
 set_tests_properties(ie03_ack_generation_contract PROPERTIES
     PASS_REGULAR_EXPRESSION "IE03_ACK_MODEL_TEST_PASS" TIMEOUT 10)
+
+# IE-04: DRM residency/accounting fixture; no GPU, ioctl, ublk or SWAP.
+add_test(NAME ie04_residency_accounting_readonly_fixture
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/tests/test_ie04_residency_observe.py")
+set_tests_properties(ie04_residency_accounting_readonly_fixture PROPERTIES
+    PASS_REGULAR_EXPRESSION "IE04_RESIDENCY_OBSERVER_FIXTURE_PASS" TIMEOUT 10)
