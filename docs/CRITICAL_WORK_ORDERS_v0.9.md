@@ -19,7 +19,7 @@
 | İş | Öncelik | Kapsam | Durum | Kapanış kanıtı |
 |---|---|---|---|---|
 | [İE-01](https://github.com/nopenstudio/nopen-vram-swap/issues/19) | P0 | Deadline ve fail-closed semantiği | [PR #17](https://github.com/nopenstudio/nopen-vram-swap/pull/17) mock uygulama taslağı | Tüm I/O girişlerinde deadline doğru, kuyruk reddi worker'a zarar vermez; belirsiz I/O başarılı sayılmaz |
-| [İE-02](https://github.com/nopenstudio/nopen-vram-swap/issues/20) | P0 | Reclaim bağımsızlığı incelemesi | Açık | Kod/sistem kaynaklı tam wait-for grafiği, lock-GFP-allocation matrisi ve belirsizlikler |
+| [İE-02](https://github.com/nopenstudio/nopen-vram-swap/issues/20) | P0 | Reclaim bağımsızlığı incelemesi | [Analiz raporu / PR #31](https://github.com/nopenstudio/nopen-vram-swap/pull/31) (İE-05 uygulama bekliyor) | Kod/sistem kaynaklı tam wait-for grafiği, lock-GFP-allocation matrisi ve belirsizlikler |
 | [İE-03](https://github.com/nopenstudio/nopen-vram-swap/issues/21) | P0 | ACK verilen sayfaların korunması tasarımı | Açık | Önceden onaylanan veriler için sağlam ACK, authoritative backing ve veri kaybı modeli |
 | [İE-04](https://github.com/nopenstudio/nopen-vram-swap/issues/22) | P0 | VRAM residency ve GTT kontrolü | Açık | AMDGPU bellek migrasyonu ölçülür; pin/rezervasyon veya eşdeğer güvenlik kanıtı |
 | [İE-05](https://github.com/nopenstudio/nopen-vram-swap/issues/23) | P0 | Reclaim bağımsız I/O uygulaması | Açık | Reclaim sırasında ublk/IPC/GPU I/O ilerleyebilir; döngüsel bağımlılıklar yok |
@@ -71,6 +71,12 @@
 - Geçmiş `v012`/`v020`…`v085`, `legacy` ve `src/nopen_vulkan_probe.c` kaynakları silinmez; bazıları yeni testlerin bağımlılığıdır. Vulkan ve eski NBD güncel yeni backend rotası değildir.
 - `docs/ci-history/` yalnızca tarihsel kayıt; GitHub Actions tarafından çalıştırılmaz. Yeni workflow başına sürüm türetilmez, tek aktif mock CI tercihi korunur.
 - `v090/` klasörü, sıfırdan ayrı bir sürüm kökü oluşturmak için **şimdi** açılmayacak. Geçişin mimarisi olgunlaşınca tasarlanacak.
+
+## İE-02 analiz kanıtı (3 Kasım 2026)
+
+- [Kaynak satırlarına bağlı reclaim risk raporu](reports/2026-11-03-ie02-reclaim-source-audit.md): GFP/lock/RAM matrisi, OpenCL ve SSD-shadow için koşullu bekleme döngüleri, doğrulanmamış kernel/driver kaynakları ve İE-05'e devredilecek uygulama gereksinimleri.
+- [İE-02 PR #31](https://github.com/nopenstudio/nopen-vram-swap/pull/31): 33 kaynak işareti, 3 sıralama kontrolü, mock/statik regresyon. **Gerçek reclaim bağımsızlığı veya donmanın kök nedeni kanıtlanmadı.**
+- İE-02 analiz olarak kapanabilir; fiziksel reclaim forward-progress P0 sorunu **İE-05** tamamlanana dek açık ve `KERNEL_SWAP_BLOCKED` korunur.
 
 ## Olay ve test arşivi
 
