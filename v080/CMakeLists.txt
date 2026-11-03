@@ -79,6 +79,16 @@ add_test(NAME v081_vram_direct_segment_boundary_64k
          --worker $<TARGET_FILE:nopen-isolated-worker>)
 set_tests_properties(v081_vram_direct_segment_boundary_64k
  PROPERTIES PASS_REGULAR_EXPRESSION "segment_edge_checks=3" TIMEOUT 30)
+# IE-04/A1: only 256MiB MOCK direct IO; includes negative policy fixtures.
+# This test never starts OpenCL or activates a kernel block/swap device.
+add_test(NAME ie04_a1_safe_256m_gpu_only_mock_guard_and_integrity
+ COMMAND "${Python3_EXECUTABLE}"
+         "${CMAKE_CURRENT_LIST_DIR}/tests/test_ie04_a1.py"
+         $<TARGET_FILE:nopen-v080-vram-direct-bench>
+         $<TARGET_FILE:nopen-isolated-worker>)
+set_tests_properties(ie04_a1_safe_256m_gpu_only_mock_guard_and_integrity
+ PROPERTIES PASS_REGULAR_EXPRESSION "IE04_A1_MOCK_GUARD_PASS" TIMEOUT 120)
+
 add_executable(nopen-v080-gpu-bench src/nopen_gpu_bench.c)
 target_link_libraries(nopen-v080-gpu-bench PRIVATE nopen_vram_store)
 target_compile_options(nopen-v080-gpu-bench PRIVATE -Wall -Wextra -Wpedantic -Werror)
