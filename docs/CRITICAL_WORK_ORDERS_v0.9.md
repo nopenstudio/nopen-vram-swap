@@ -20,7 +20,7 @@
 |---|---|---|---|---|
 | [İE-01](https://github.com/nopenstudio/nopen-vram-swap/issues/19) | P0 | Deadline ve fail-closed semantiği | [PR #17](https://github.com/nopenstudio/nopen-vram-swap/pull/17) mock uygulama taslağı | Tüm I/O girişlerinde deadline doğru, kuyruk reddi worker'a zarar vermez; belirsiz I/O başarılı sayılmaz |
 | [İE-02](https://github.com/nopenstudio/nopen-vram-swap/issues/20) | P0 | Reclaim bağımsızlığı incelemesi | [Analiz raporu / PR #31](https://github.com/nopenstudio/nopen-vram-swap/pull/31) (İE-05 uygulama bekliyor) | Kod/sistem kaynaklı tam wait-for grafiği, lock-GFP-allocation matrisi ve belirsizlikler |
-| [İE-03](https://github.com/nopenstudio/nopen-vram-swap/issues/21) | P0 | ACK verilen sayfaların korunması tasarımı | Açık | Önceden onaylanan veriler için sağlam ACK, authoritative backing ve veri kaybı modeli |
+| [İE-03](https://github.com/nopenstudio/nopen-vram-swap/issues/21) | P0 | ACK verilen sayfaların korunması tasarımı | [ADR-003 tasarım kararı](adr/ADR-003-acknowledged-swap-page-protection.md) (İE-06 uygulama bekliyor) | Önceden onaylanan veriler için sağlam ACK, authoritative backing ve veri kaybı modeli |
 | [İE-04](https://github.com/nopenstudio/nopen-vram-swap/issues/22) | P0 | VRAM residency ve GTT kontrolü | Açık | AMDGPU bellek migrasyonu ölçülür; pin/rezervasyon veya eşdeğer güvenlik kanıtı |
 | [İE-05](https://github.com/nopenstudio/nopen-vram-swap/issues/23) | P0 | Reclaim bağımsız I/O uygulaması | Açık | Reclaim sırasında ublk/IPC/GPU I/O ilerleyebilir; döngüsel bağımlılıklar yok |
 | [İE-06](https://github.com/nopenstudio/nopen-vram-swap/issues/24) | P0 | Worker/GPU arızası kurtarması | Açık | Arıza sonrası ACK sayfalarının doğrulanmış şekilde kurtarılması |
@@ -77,6 +77,12 @@
 - [Kaynak satırlarına bağlı reclaim risk raporu](reports/2026-11-03-ie02-reclaim-source-audit.md): GFP/lock/RAM matrisi, OpenCL ve SSD-shadow için koşullu bekleme döngüleri, doğrulanmamış kernel/driver kaynakları ve İE-05'e devredilecek uygulama gereksinimleri.
 - [İE-02 PR #31](https://github.com/nopenstudio/nopen-vram-swap/pull/31): 33 kaynak işareti, 3 sıralama kontrolü, mock/statik regresyon. **Gerçek reclaim bağımsızlığı veya donmanın kök nedeni kanıtlanmadı.**
 - İE-02 analiz olarak kapanabilir; fiziksel reclaim forward-progress P0 sorunu **İE-05** tamamlanana dek açık ve `KERNEL_SWAP_BLOCKED` korunur.
+
+## İE-03 ACK sayfa koruma kararı (3 Kasım 2026)
+
+- [ADR-003](adr/ADR-003-acknowledged-swap-page-protection.md), [PR #32](https://github.com/nopenstudio/nopen-vram-swap/pull/32): **SSD authoritative COW/journal, GPU optional cache** kararı; 4 GiB maliyet ve arıza matrisi, atomic commit/ACK, same-boot replay/generation sözleşmesi.
+- [İE-03 Python referans modeli](../tools/ie03_ack_model.py): sadece bellekteki journal simülasyonu; GPU, disk, kernel swap veya gerçek kriptografi içermez. **İE-06 gerçek C/storage/ublk recovery uygulaması hâlâ P0 blocker.**
+- Seçilen güvenli profilin yazma yolu **SSD commit hızına bağlıdır**; GPU-only kernel swap güvenli değildir. `KERNEL_SWAP_BLOCKED` korunur.
 
 ## Olay ve test arşivi
 

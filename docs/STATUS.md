@@ -1,6 +1,6 @@
 # Current research status
 
-**2026-11-03 governance update:** Current implementation still targets v0.8.5. **v0.9.0 is a future crash-stabilization acceptance target, not a release.** The canonical roadmap is [Critical work orders](CRITICAL_WORK_ORDERS_v0.9.md) and [umbrella Issue #18](https://github.com/nopenstudio/nopen-vram-swap/issues/18). Work order 01 has draft PR #17 with mock validation; 02 reclaim dependency audit is next. Both original kernel SWAP crash issues remain open.
+**2026-11-03 stabilization update:** Current codebase remains v0.8.5; **v0.9.0 is a future acceptance target, not a release.** [Canonical work orders](CRITICAL_WORK_ORDERS_v0.9.md) / [umbrella Issue #18](https://github.com/nopenstudio/nopen-vram-swap/issues/18). IE-01 [PR #17](https://github.com/nopenstudio/nopen-vram-swap/pull/17) remains draft. IE-02 [source audit / PR #31](https://github.com/nopenstudio/nopen-vram-swap/pull/31) is merged as analysis only; reclaim independence is still P0-open in IE-05. IE-03 [ADR-003](adr/ADR-003-acknowledged-swap-page-protection.md) selects **SSD-authoritative COW/journal plus optional GPU cache**, *model only*, not a real recovery engine. Original GPU swap host freezes remain unexplained and **KERNEL_SWAP_BLOCKED**.
 
 
 **Date:** 2026-10-31 · **Active development:** v0.8.5 Reserved VRAM · **Release:** none
