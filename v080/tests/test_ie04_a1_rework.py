@@ -225,6 +225,7 @@ with TemporaryDirectory() as tmp:
     complete = {
         "bench_pid": 700, "bench_starttime_ticks": "11",
         "worker_pid": 701, "worker_starttime_ticks": "22",
+        "drm_pid": 701,
         "drm_evidence": "COMPLETE_CLIENT_COUNTERS_NOT_PHYSICAL_BO_PROOF",
         **{f"drm_{metric}_{region}_mib": 2.0
            for metric in ("resident", "total")
