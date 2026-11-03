@@ -92,13 +92,28 @@ try:
     # handshake. communicate() must return bounded strings, not repeat it.
     assert isinstance(stdout, str) and isinstance(stderr, str)
     assert time.monotonic() - begun < 8, "pipe cleanup unexpectedly unbounded"
-    try:
-        os.killpg(p.pid, 0)
-    except ProcessLookupError:
-        pass
-    else:
-        # A process group with a live, SIGTERM-ignoring child would be here.
-        raise AssertionError("F1: orphan worker process group remains alive")
+    # Zombies may persist until PID 1 reaps them (especially on CI).
+    # killpg(0) can still see a zombie group, so require no LIVE member.
+    def alive_members(pgid):
+        results = []
+        for path in Path("/proc").iterdir():
+            if not path.name.isdecimal():
+                continue
+            try:
+                raw = (path / "stat").read_text()
+                fields = raw[raw.rfind(")") + 1:].split()
+                if (len(fields) > 2 and fields[2] == str(pgid)
+                        and fields[0] not in ("Z", "X")):
+                    results.append((path.name, fields[0]))
+            except (OSError, ValueError):
+                continue
+        return results
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline and alive_members(p.pid):
+        time.sleep(0.02)
+    assert not alive_members(p.pid), (
+        "F1: live orphan worker remains in owned process group",
+        alive_members(p.pid))
 finally:
     try:
         os.killpg(p.pid, signal.SIGKILL)
