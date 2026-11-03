@@ -22,7 +22,7 @@ SCHEMA = "NOPEN_IE02_RECLAIM_DEPENDENCY_AUDIT_V1"
 EVIDENCE = (
     ("KERNEL_GATE", "v070/experimental/ublk/nopen_ublk_swap_target.cpp",
      "const bool physical_lab=", "init", "host-safety",
-     "Physical-host ublk path can be explicitly selected; not certified."),
+     "Physical-host ublk path exists in source but is fail-closed."),
     ("UBLK_CALLBACK", "v070/experimental/ublk/nopen_ublk_swap_target.cpp",
      "int on_io(const ublksrv_queue* q,const ublk_io_data* io)", "hot",
      "kernel/userspace",
@@ -42,7 +42,7 @@ EVIDENCE = (
      "Callers enter a serialized IPC transfer; admission policy is checked below."),
     ("IPC_TIMER", "v060/src/nopen_isolated_io.c",
      "uint64_t deadline=begin_ms+r->timeout_ms;", "hot", "timer",
-     "Starts clock AFTER acquiring the IPC mutex on the v0.8.5 baseline."),
+     "Starts dispatched operation deadline after a bounded or legacy admission stage."),
     ("IPC_POLL", "v060/src/nopen_isolated_io.c",
      "int rc=poll(&p,1,remaining);", "hot", "socket-wait",
      "Bounds parent userspace IPC polling, not the GPU driver's kernel wait."),
@@ -51,27 +51,27 @@ EVIDENCE = (
      "SIGKILL cannot guarantee exit from uninterruptible D-state."),
     ("IPC_PARENT_STAGING", "v060/src/nopen_isolated_io.c",
      "r->staging=malloc(NOPEN_BLK_MAX_BYTES);", "init", "userspace-RAM",
-     "Parent staging allocated but no full parent/service mlock guarantee."),
+     "Parent staging is prefaulted with optional strict mlock; driver allocations remain unprotected."),
     ("WORKER_READY", "v060/src/nopen_isolated_worker.c",
      "nopen_ipc_msg msg={NOPEN_IPC_MAGIC,NOPEN_IPC_READY,0,0,",
      "init", "lifecycle",
-     "Worker sends READY before its separate worker I/O buffer is allocated."),
-    ("WORKER_STAGING_LATE", "v060/src/nopen_isolated_worker.c",
-     "unsigned char *buffer=malloc(NOPEN_BLK_MAX_BYTES);", "init",
+     "Worker READY only follows successful staging allocation and prefault."),
+    ("WORKER_STAGING_PRE_READY", "v060/src/nopen_isolated_worker.c",
+     "buffer=malloc(NOPEN_BLK_MAX_BYTES);", "init",
      "userspace-RAM",
-     "Worker buffer allocation is after the READY reply."),
-    ("WORKER_STAGING_MLOCK_LATE", "v060/src/nopen_isolated_worker.c",
-     "if(mlock(buffer,NOPEN_BLK_MAX_BYTES)!=0)", "init", "mlock",
-     "Worker I/O buffer mlock is after READY; only conditional fatal behavior."),
+     "Worker staging is allocated before READY."),
+    ("WORKER_STAGING_MLOCK_PRE_READY", "v060/src/nopen_isolated_worker.c",
+     "if(mlock(buffer,NOPEN_BLK_MAX_BYTES)==0)", "init", "mlock",
+     "Worker buffer is prefaulted and locked (strictly required in strict mode) before READY."),
     ("WORKER_OOM_ADJ_BEST_EFFORT", "v060/src/nopen_isolated_worker.c",
      "FILE *score=fopen(\"/proc/self/oom_score_adj\",\"w\");", "init",
      "OOM-policy", "OOM score adjustment is best effort, not I/O liveness."),
     ("BLOCK_ALLOC_META", "v050/src/nopen_blk_backend.c",
      "b->meta=calloc(b->pages,sizeof(*b->meta));", "init",
      "userspace-RAM", "Page metadata is allocated at startup."),
-    ("BLOCK_OPEN_GPU_BEFORE_MLOCK", "v050/src/nopen_blk_backend.c",
+    ("BLOCK_OPEN_GPU_AFTER_MLOCK", "v050/src/nopen_blk_backend.c",
      "if(nopen_store_open(&b->store,backend,mib)!=0)", "init",
-     "driver-memory", "OpenCL store opens before block metadata mlock."),
+     "driver-memory", "Strict metadata is locked before OpenCL store is opened."),
     ("BLOCK_META_MLOCK", "v050/src/nopen_blk_backend.c",
      "if(mlock(b->meta,b->pages*sizeof(*b->meta))!=0", "init",
      "mlock", "Only selected metadata/staging buffers are locked."),
@@ -229,18 +229,19 @@ def audit_texts(texts: dict[str, str]) -> dict:
     ordered = {
         "ipc_admission_precedes_request_deadline":
           admission_mode != "UNRECOGNIZED",
-        "worker_ready_precedes_staging_allocation":
-          0 < first(worker_lines, "NOPEN_IPC_READY,0,0,")
-            < first(worker_lines, "unsigned char *buffer=malloc(NOPEN_BLK_MAX_BYTES);"),
-        "gpu_store_opens_before_metadata_mlock":
-          0 < first(block_lines, "nopen_store_open(&b->store")
-            < first(block_lines, "if(mlock(b->meta,"),
+        "worker_staging_precedes_ready":
+          0 < first(worker_lines, "buffer=malloc(NOPEN_BLK_MAX_BYTES);")
+            < first(worker_lines, "if(mlock(buffer,NOPEN_BLK_MAX_BYTES)==0)")
+            < first(worker_lines, "NOPEN_IPC_READY,0,0,"),
+        "gpu_metadata_mlock_precedes_store_open":
+          0 < first(block_lines, "if(mlock(b->meta,")
+            < first(block_lines, "nopen_store_open(&b->store"),
     }
     missing.extend(key for key, ok in ordered.items() if not ok)
     physical_script = texts.get("v080/tools/v081_direct4g_kernel_lab.sh", "")
     direct4g_start_is_routable = "start) :;;" in physical_script
     return {
-        "schema": SCHEMA, "scope": "v0.8.5 baseline, mock/static only",
+        "schema": SCHEMA, "scope": "IE01/02 runtime patched, mock/static only",
         "source_contract_intact": not missing,
         "missing_or_reordered": missing,
         "evidence": evidence,
