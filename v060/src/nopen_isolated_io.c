@@ -166,8 +166,7 @@ int nopen_isolated_open_with_policy(nopen_isolated_io **out,nopen_backend backen
         if(mlock(r->staging,NOPEN_BLK_MAX_BYTES)!=0) {
             fprintf(stderr,"NOPEN_IPC_OPEN_REFUSED reason=parent_staging_mlock"
                            " kernel_swap=BLOCKED errno=%d\n",errno);
-            if(r->staging_locked)munlock(r->staging,NOPEN_BLK_MAX_BYTES);
-        free(r->staging);free(r);return -ENOMEM;
+            free(r->staging);free(r);return -ENOMEM;
         }
         r->staging_locked=1;
     }
@@ -177,13 +176,15 @@ int nopen_isolated_open_with_policy(nopen_isolated_io **out,nopen_backend backen
     }
     int sv[2];
     if(socketpair(AF_UNIX,SOCK_STREAM,0,sv)!=0) {
-        pthread_mutex_destroy(&r->lock);if(r->staging_locked)munlock(r->staging,NOPEN_BLK_MAX_BYTES);
+        pthread_mutex_destroy(&r->lock);
+        if(r->staging_locked)munlock(r->staging,NOPEN_BLK_MAX_BYTES);
         free(r->staging);free(r);return -EIO;
     }
     posix_spawn_file_actions_t act;
     if(posix_spawn_file_actions_init(&act)!=0) {
         close(sv[0]);close(sv[1]);
-        pthread_mutex_destroy(&r->lock);if(r->staging_locked)munlock(r->staging,NOPEN_BLK_MAX_BYTES);
+        pthread_mutex_destroy(&r->lock);
+        if(r->staging_locked)munlock(r->staging,NOPEN_BLK_MAX_BYTES);
         free(r->staging);free(r);return -EIO;
     }
     /* Close the parent side BEFORE replacing fd 3 to avoid accidental close
@@ -202,7 +203,8 @@ int nopen_isolated_open_with_policy(nopen_isolated_io **out,nopen_backend backen
     close(sv[1]);
     if(spawn_rc!=0) {
         close(sv[0]);
-        pthread_mutex_destroy(&r->lock);if(r->staging_locked)munlock(r->staging,NOPEN_BLK_MAX_BYTES);
+        pthread_mutex_destroy(&r->lock);
+        if(r->staging_locked)munlock(r->staging,NOPEN_BLK_MAX_BYTES);
         free(r->staging);free(r);
         return -EIO;
     }
@@ -213,7 +215,8 @@ int nopen_isolated_open_with_policy(nopen_isolated_io **out,nopen_backend backen
     if(rc!=0 || ready.magic!=NOPEN_IPC_MAGIC || ready.op!=NOPEN_IPC_READY ||
        ready.status!=0) {
         terminate_child(r);
-        pthread_mutex_destroy(&r->lock);if(r->staging_locked)munlock(r->staging,NOPEN_BLK_MAX_BYTES);
+        pthread_mutex_destroy(&r->lock);
+        if(r->staging_locked)munlock(r->staging,NOPEN_BLK_MAX_BYTES);
         free(r->staging);free(r);
         return rc==-ETIMEDOUT?-ETIMEDOUT:-EIO;
     }
@@ -388,6 +391,5 @@ void nopen_isolated_close(nopen_isolated_io *r) {
     pthread_mutex_unlock(&r->lock);
     pthread_mutex_destroy(&r->lock);
     if(r->staging_locked)munlock(r->staging,NOPEN_BLK_MAX_BYTES);
-        if(r->staging_locked)munlock(r->staging,NOPEN_BLK_MAX_BYTES);
     free(r->staging);free(r);
 }
