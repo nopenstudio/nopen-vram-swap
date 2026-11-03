@@ -79,6 +79,10 @@ parent_code = (
     "import subprocess,sys\n"
     f"subprocess.Popen([sys.executable,'-c',{child_code!r}])\n"
 )
+outsider = subprocess.Popen(
+    [sys.executable, "-c", "import time;time.sleep(20)"],
+    start_new_session=True, stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL)
 p = subprocess.Popen([sys.executable, "-c", parent_code], text=True,
                      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                      start_new_session=True)
@@ -114,6 +118,7 @@ try:
     assert not alive_members(p.pid), (
         "F1: live orphan worker remains in owned process group",
         alive_members(p.pid))
+    assert outsider.poll() is None, "F1: unrelated process group was signaled"
 finally:
     try:
         os.killpg(p.pid, signal.SIGKILL)
@@ -126,30 +131,36 @@ finally:
             p.stdout.close()
         if p.stderr:
             p.stderr.close()
+    if outsider.poll() is None:
+        outsider.terminate()
+    outsider.wait(timeout=3)
 
 with TemporaryDirectory() as tmp:
     root = Path(tmp)
     devices, gpu, meminfo, swaps, proc = fixture(root)
     argv = args(devices, meminfo, swaps, proc, "--skip-build")
 
-    # F2: first 4KiB returns FAIL (not exception); 64KiB must NEVER start.
-    first_calls = []
+    # F2: first 4KiB returns FAIL or BLOCKED (not exception);
+    # in BOTH cases no 64KiB launch may occur.
     real_build = runner.build_once
     real_bench = runner.benchmark_once
     runner.build_once = lambda a: (Path("/mock/bench"), Path("/mock/worker"))
-    def failing_first(a, bench, worker, kib):
-        first_calls.append(kib)
-        return {"io_kib": kib, "status": "FAIL", "failure": "simulated",
-                "metrics": "UNKNOWN",
-                "drm_counters_complete_during_benchmark": False}
-    runner.benchmark_once = failing_first
     try:
-        status, report = invoke(argv)
-        result = json.loads(next(x for x in report.splitlines() if x.startswith("{")))
-        assert status != 0 and first_calls == [4], (status, first_calls)
-        assert [r["status"] for r in result["runs"]] == [
-            "FAIL", "NOT_STARTED_DUE_TO_PRIOR_FAILURE"
-        ]
+        for initial_status in ("FAIL", "BLOCKED"):
+            first_calls = []
+            def failing_first(a, bench, worker, kib):
+                first_calls.append(kib)
+                return {"io_kib": kib, "status": initial_status,
+                        "failure": "simulated", "metrics": "UNKNOWN",
+                        "drm_counters_complete_during_benchmark": False}
+            runner.benchmark_once = failing_first
+            status, report = invoke(argv)
+            result = json.loads(next(
+                x for x in report.splitlines() if x.startswith("{")))
+            assert status != 0 and first_calls == [4], (status, first_calls)
+            assert [r["status"] for r in result["runs"]] == [
+                initial_status, "NOT_STARTED_DUE_TO_PRIOR_FAILURE"
+            ]
     finally:
         runner.build_once = real_build
         runner.benchmark_once = real_bench
@@ -189,6 +200,21 @@ with TemporaryDirectory() as tmp:
         runner.build_once = real_build
         runner.benchmark_once = real_bench
     meminfo.write_text("MemAvailable: 3200000 kB\n")
+
+    # F4a-VRAM: driver accounting can grow during the build; post-build
+    # headroom is checked again, not assumed from the initial probe.
+    def build_then_consume_vram(a):
+        (gpu / "mem_info_vram_used").write_text(str(15000 * MIB))
+        return Path("/mock/bench"), Path("/mock/worker")
+    runner.build_once = build_then_consume_vram
+    runner.benchmark_once = lambda *a: did_run.append(True)
+    try:
+        result_code, _ = invoke(argv)
+        assert result_code != 0 and not did_run
+    finally:
+        runner.build_once = real_build
+        runner.benchmark_once = real_bench
+        (gpu / "mem_info_vram_used").write_text(str(500 * MIB))
 
     # F4b: even after a passing first run, a newly activated NBD swap
     # blocks the second run; no 64KiB process may begin.
