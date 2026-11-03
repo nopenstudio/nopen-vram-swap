@@ -3,6 +3,13 @@
 **Not a list of stable releases. All milestones below are experimental.**
 Kernel SWAP activation remains `KERNEL_SWAP_BLOCKED`.
 
+## Planned v0.9.0 | Critical crash-stabilization work orders (NOT RELEASED)
+
+- 2026-11-03: opened [program Issue #18](https://github.com/nopenstudio/nopen-vram-swap/issues/18) and [10 work orders](docs/CRITICAL_WORK_ORDERS_v0.9.md). No version tag or v090 source tree yet.
+- Work order 01: [draft PR #17](https://github.com/nopenstudio/nopen-vram-swap/pull/17), separate admission/worker IPC deadlines. Does not guarantee reclaim safety or recovery of ACKed GPU-only swap data.
+- Work order 02: reclaim dependency source audit is next.
+- **KERNEL_SWAP_BLOCKED** remains mandatory; no physical GPU-only swap activation authorized.
+
 ## v0.8.5 - 2026-10-31 (Reserved VRAM Phase A/B)
 
 - Added read-only AMDGPU VRAM/GTT capacity preflight and counter observer.

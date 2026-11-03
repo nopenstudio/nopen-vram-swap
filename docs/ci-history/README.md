@@ -1,7 +1,9 @@
 # Archived GitHub Actions workflows
 
-These YAML definitions are **historical evidence**, preserved from the prior `develop/v0.8.5` tree. They are no longer under `.github/workflows/` and **will not be scheduled by GitHub Actions**.
+These YAML definitions are **historical evidence**, preserved from earlier experimental branches and the former v0.8.5 dedicated mock workflow. They are no longer under `.github/workflows/`, so **GitHub Actions will not schedule them**.
 
-Several experiments related to kernel devices, VM pressure and historical active SWAP; do not treat archived workflow commands as safe to reproduce on your personal computer. To examine the current suite see [CI.md](../CI.md) and [SAFETY.md](../SAFETY.md).
+The single active, safe `NOPEN_OPENCL=OFF` workflow is [`.github/workflows/build.yml`](../../.github/workflows/build.yml), documented in [CI.md](../CI.md).
 
-Archive does **not** erase or rewrite commit history. The old workflows also remain accessible in their original Git revisions.
+**Legacy Vulkan and historical NBD/ublk swap test workflows are archived, not part of the planned v0.9.0 OpenCL stabilization path.** Some historical experiments can freeze or damage unsaved work on a physical computer. Do not reproduce them on a primary workstation. The safety gate is `KERNEL_SWAP_BLOCKED`.
+
+See [critical work orders](../CRITICAL_WORK_ORDERS_v0.9.md) and [safety policy](../SAFETY.md).

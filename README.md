@@ -1,9 +1,9 @@
 # Nopen VRAM SWAP
 
 **Experimental AMD GPU-memory research for Linux and future NopenOS.**  
-**Current development: v0.8.5 Reserved VRAM, not a usable kernel SWAP product.**
+**Current codebase: v0.8.5 OpenCL research. Crash-stabilization target: v0.9.0 (NOT released). Not a usable kernel SWAP product.**
 
-[Türkçe](README_TR.md) · [Project status](docs/STATUS.md) · [Architecture](docs/ARCHITECTURE.md) · [Safety rules](docs/SAFETY.md) · [Build and tests](docs/DEVELOPMENT.md) · [Version history](docs/RELEASES.md)
+[Türkçe](README_TR.md) · **[Critical work orders and implementation](docs/CRITICAL_WORK_ORDERS_v0.9.md)** · [Project status](docs/STATUS.md) · [Architecture](docs/ARCHITECTURE.md) · [Safety rules](docs/SAFETY.md) · [Build and tests](docs/DEVELOPMENT.md) · [Version history](docs/RELEASES.md)
 
 > **SAFETY: KERNEL_SWAP_BLOCKED.** Nopen does not currently offer safe system-wide VRAM-backed SWAP. Earlier live NBD and 4 GiB ublk SWAP experiments produced serious failures, including a complete host freeze. Do not enable archived SWAP launchers on your everyday computer. The installed **zram** should be left alone.
 
@@ -53,12 +53,16 @@ python3 v085/tools/reserved_vram_observe.py --samples 5 --interval-seconds 1
 
 A passing preflight only says a GPU-only experiment has enough apparent headroom; it **does not** allocate or reserve memory. The actual GPU-only Holder is a separate, explicitly acknowledged experiment described in [v085/README.md](v085/README.md). No `sudo`, kernel device or `swapon` belongs in the default verification path.
 
-## Current research questions
+## Crash stabilization: critical work orders and implementation
 
-1. After exiting the OpenCL Holder, **when and why** do global AMDGPU VRAM counters return toward baseline?
-2. Can a driver-supported, **non-evictable** VRAM reservation be implemented without damaging graphics workloads?
-3. Can the entire I/O path remain able to make progress during kernel reclaim, with recoverable data following GPU reset?
-4. Only after (2) and (3) are demonstrated on recoverable lab hardware may the SWAP gate be reconsidered.
+**Target: v0.9.0 only after 10 work orders have passed explicit acceptance.** No release or tag is being created now. The ordered scope is deadline/fail-closed, reclaim dependency audit, acknowledged-page safety architecture, VRAM/GTT residency, reclaim-independent I/O, GPU/worker recovery, queue concurrency, zram policy, fault injection/telemetry and recoverable-hardware acceptance.
+
+- **[Umbrella issue #18](https://github.com/nopenstudio/nopen-vram-swap/issues/18)**: canonical task board with 10 linked subissues.
+- **[Work-order specification and release gates](docs/CRITICAL_WORK_ORDERS_v0.9.md)**: scope, evidence and pass/fail rules.
+- **[WO-01 draft PR #17](https://github.com/nopenstudio/nopen-vram-swap/pull/17)**: initial mock-tested IPC deadline change, not a live swap fix.
+- **[WO-02 reclaim audit](https://github.com/nopenstudio/nopen-vram-swap/issues/20)**: next order of work.
+
+`KERNEL_SWAP_BLOCKED` remains mandatory on the primary computer.
 
 **Development branch:** [`develop/v0.8.5`](https://github.com/nopenstudio/nopen-vram-swap/tree/develop/v0.8.5) · [Issue #10](https://github.com/nopenstudio/nopen-vram-swap/issues/10) · [Development PR #14](https://github.com/nopenstudio/nopen-vram-swap/pull/14)
 

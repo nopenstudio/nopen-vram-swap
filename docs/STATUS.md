@@ -1,5 +1,8 @@
 # Current research status
 
+**2026-11-03 governance update:** Current implementation still targets v0.8.5. **v0.9.0 is a future crash-stabilization acceptance target, not a release.** The canonical roadmap is [Critical work orders](CRITICAL_WORK_ORDERS_v0.9.md) and [umbrella Issue #18](https://github.com/nopenstudio/nopen-vram-swap/issues/18). Work order 01 has draft PR #17 with mock validation; 02 reclaim dependency audit is next. Both original kernel SWAP crash issues remain open.
+
+
 **Date:** 2026-10-31 · **Active development:** v0.8.5 Reserved VRAM · **Release:** none
 
 | Gate | Status | Confidence |
@@ -19,7 +22,7 @@
 
 See [2026-10-31 RX 9060 XT report](reports/2026-10-31-rx9060xt.md). 1 GiB OpenCL readback and Holder PASS, but a PASS here applies to userland storage only. The counter after OpenCL handle close does not establish whether/when memory is released.
 
-## Next session
+## Previous v0.8.5 research notes (not the v0.9 work-order queue)
 
 1. **No new GPU allocation first.** Read-only delayed VRAM/GTT time series after Holder exit; inspect per-process GPU allocations if usage stays high.
 2. Keep `KERNEL_SWAP_BLOCKED`. Preserve existing zram.

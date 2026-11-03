@@ -1,4 +1,6 @@
-# Architecture | 2026-10-31
+# Architecture | research baseline v0.8.5
+
+**Crash stabilization target v0.9.0:** [critical work orders](CRITICAL_WORK_ORDERS_v0.9.md) / [Issue #18](https://github.com/nopenstudio/nopen-vram-swap/issues/18). This is a future safety milestone, not the current architecture. Do not confuse analysis (İE-02) with implementation (İE-05), or data-protection design (İE-03) with worker/GPU recovery (İE-06).
 
 ## Scope and boundaries
 
@@ -46,7 +48,7 @@ None of (2–5) is proven for live kernel SWAP. Budget numbers are arithmetic on
 
 ## Build/deployment boundaries
 
-Root CMake builds mock/CPU tests by default; current version CMake chains older modules because of source dependencies. The standalone historical Vulkan experiment is opt-in. No GUI, systemd service, boot changes, initramfs hook, kernel patch, real `swapon`, or third-party plugin is part of the default build.
+Root CMake builds mock/CPU tests by default; current version CMake chains older modules because of source dependencies. The historical Vulkan experiment is archived, not an active engineering path; its optional build is retained only for source history. No GUI, systemd service, boot changes, initramfs hook, kernel patch, real `swapon`, or third-party plugin is part of the default build.
 
 Current Linux/Python diagnostics are host tests only. A future NopenOS userland must not depend on GNU assumptions merely because these prototypes run on Garuda Linux.
 
