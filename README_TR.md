@@ -1,9 +1,9 @@
 # Nopen VRAM SWAP
 
 **Linux ve gelecekteki NopenOS için AMD GPU belleği araştırma projesi.**  
-**Güncel geliştirme: v0.8.5 Reserved VRAM. Henüz kullanılabilir bir gerçek kernel SWAP ürünü değil.**
+**Güncel kod tabanı: v0.8.5 (OpenCL). Kritik kararlılık hedefi: v0.9.0. Henüz kullanılabilir bir gerçek kernel SWAP ürünü değil.**
 
-[English](README.md) · [Durum](docs/STATUS.md) · [Mimari](docs/ARCHITECTURE.md) · [Güvenlik](docs/SAFETY.md) · [Kurulum ve test](docs/DEVELOPMENT.md) · [Sürüm geçmişi](docs/RELEASES.md)
+[English](README.md) · **[Kritik İş Emirleri ve Uygulamalar](docs/CRITICAL_WORK_ORDERS_v0.9.md)** · [Durum](docs/STATUS.md) · [Mimari](docs/ARCHITECTURE.md) · [Güvenlik](docs/SAFETY.md) · [Kurulum ve test](docs/DEVELOPMENT.md) · [Sürüm geçmişi](docs/RELEASES.md)
 
 > **GÜVENLİK: KERNEL_SWAP_BLOCKED.** Eski NBD ve 4 GiB ublk üzerinden etkinleştirilen gerçek SWAP denemeleri ağır hatalara ve tam sistem donmasına yol açtı. Ana bilgisayarında arşivdeki SWAP başlatıcılarını çalıştırma. Mevcut **zram** yapılandırmasını koru.
 
@@ -53,12 +53,16 @@ python3 v085/tools/reserved_vram_observe.py --samples 5 --interval-seconds 1
 
 `PREFLIGHT_PASS` ifadesi 4 GiB ayırdığımız anlamına gelmez. Gerçek OpenCL Holder ayrı, izin isteyen GPU-only deneyidir; ayrıntılar [v085 rehberinde](v085/README.md).
 
-## Sıradaki araştırma
+## Çökme Sorunu İçin Kritik İş Emirleri ve Uygulamalar
 
-1. Holder kapandığında neden VRAM sayacı hemen eski seviyeye dönmüyor?
-2. AMDGPU sürücüsünde gerçekten korunmuş, tahliye edilmeyen bir VRAM alanı oluşturabilir miyiz?
-3. Kernel bellek baskısı sırasında Nopen I/O yolunun kesin ilerlemesini ve GPU resetinden veri kurtarmayı nasıl sağlarız?
-4. Bu sorunlar çözülmeden **gerçek SWAP açılmayacak**.
+**10 resmî iş emri, tek hedef: v0.9.0.** Deadline/fail-closed → reclaim bağımsızlığı → ACK sayfası koruma mimarisi → gerçek VRAM residency → reclaim bağımsız I/O → GPU/worker kurtarma → kuyruklar → zram politikası → arıza telemetrisi → bağımsız donanım kabulü.
+
+- [Ana takip: Issue #18](https://github.com/nopenstudio/nopen-vram-swap/issues/18)
+- [İş emirleri, kabul koşulları ve sürüm güvenlik kapıları](docs/CRITICAL_WORK_ORDERS_v0.9.md)
+- [İE-01 / PR #17](https://github.com/nopenstudio/nopen-vram-swap/pull/17): ilk IPC deadline düzenlemesi mock testleri geçti, ancak henüz birleşmiş veya tam güvenli swap değil.
+- [İE-02 / Reclaim bağımsızlığı incelemesi](https://github.com/nopenstudio/nopen-vram-swap/issues/20): sıradaki çalışma.
+
+**v0.9.0 henüz yayınlanmadı ve etiketi oluşturulmadı.** İş emirleri kapanmadan gerçek kernel swap etkinleştirilmeyecek.
 
 [Güncel geliştirme](https://github.com/nopenstudio/nopen-vram-swap/tree/develop/v0.8.5) · [Issue #10](https://github.com/nopenstudio/nopen-vram-swap/issues/10) · [PR #14](https://github.com/nopenstudio/nopen-vram-swap/pull/14)
 
