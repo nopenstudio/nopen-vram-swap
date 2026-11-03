@@ -2,6 +2,9 @@
 
 **Default and only approved status on the primary computer: `KERNEL_SWAP_BLOCKED`.**
 
+**v0.9.0 crash-stabilization governance:** [Issue #18](https://github.com/nopenstudio/nopen-vram-swap/issues/18) and [10 critical work orders](CRITICAL_WORK_ORDERS_v0.9.md). No new release or real SWAP authorization exists. PR #17's safety gate is on its draft branch until reviewed and merged; never assume a policy text has disabled every historical launcher.
+
+
 ### Allowed by default
 
 - Compile code with `-DNOPEN_OPENCL=OFF`; run unit/mocks and static audits.
