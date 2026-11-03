@@ -9,6 +9,7 @@ Kernel SWAP activation remains `KERNEL_SWAP_BLOCKED`.
 - Work order 01: [draft PR #17](https://github.com/nopenstudio/nopen-vram-swap/pull/17), separate admission/worker IPC deadlines. Does not guarantee reclaim safety or recovery of ACKed GPU-only swap data.
 - Work order 02: [source/lock/GFP audit PR #31](https://github.com/nopenstudio/nopen-vram-swap/pull/31) merged; reclaim liveness still not proven, IE-05 implementation open.
 - Work order 03: [ADR-003](docs/adr/ADR-003-acknowledged-swap-page-protection.md) defines authoritative COW SSD + optional VRAM cache, page ACK/commit/replay contract; only design-model tests, no runtime storage recovery. See [PR #32](https://github.com/nopenstudio/nopen-vram-swap/pull/32).
+- Work order 04: [read-only AMDGPU residency/GTT diagnostic](docs/reports/2026-11-03-ie04-amdgpu-residency-audit.md) and fixture tests added in [PR #33](https://github.com/nopenstudio/nopen-vram-swap/pull/33). **No real GPU run, BO pin or migration proof; P0 remains open.**
 - **KERNEL_SWAP_BLOCKED** remains mandatory; no physical GPU-only swap activation authorized.
 
 ## v0.8.5 - 2026-10-31 (Reserved VRAM Phase A/B)
