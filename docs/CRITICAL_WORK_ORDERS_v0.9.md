@@ -21,7 +21,7 @@
 | [İE-01](https://github.com/nopenstudio/nopen-vram-swap/issues/19) | P0 | Deadline ve fail-closed semantiği | [PR #17](https://github.com/nopenstudio/nopen-vram-swap/pull/17) mock uygulama taslağı | Tüm I/O girişlerinde deadline doğru, kuyruk reddi worker'a zarar vermez; belirsiz I/O başarılı sayılmaz |
 | [İE-02](https://github.com/nopenstudio/nopen-vram-swap/issues/20) | P0 | Reclaim bağımsızlığı incelemesi | [Analiz raporu / PR #31](https://github.com/nopenstudio/nopen-vram-swap/pull/31) (İE-05 uygulama bekliyor) | Kod/sistem kaynaklı tam wait-for grafiği, lock-GFP-allocation matrisi ve belirsizlikler |
 | [İE-03](https://github.com/nopenstudio/nopen-vram-swap/issues/21) | P0 | ACK verilen sayfaların korunması tasarımı | [ADR-003 tasarım kararı](adr/ADR-003-acknowledged-swap-page-protection.md) (İE-06 uygulama bekliyor) | Önceden onaylanan veriler için sağlam ACK, authoritative backing ve veri kaybı modeli |
-| [İE-04](https://github.com/nopenstudio/nopen-vram-swap/issues/22) | P0 | VRAM residency ve GTT kontrolü | Açık | AMDGPU bellek migrasyonu ölçülür; pin/rezervasyon veya eşdeğer güvenlik kanıtı |
+| [İE-04](https://github.com/nopenstudio/nopen-vram-swap/issues/22) | P0 | VRAM residency ve GTT kontrolü | [Salt okunur gözlemci ve rapor](reports/2026-11-03-ie04-amdgpu-residency-audit.md), **P0 açık** | AMDGPU bellek migrasyonu ölçülür; pin/rezervasyon veya eşdeğer güvenlik kanıtı |
 | [İE-05](https://github.com/nopenstudio/nopen-vram-swap/issues/23) | P0 | Reclaim bağımsız I/O uygulaması | Açık | Reclaim sırasında ublk/IPC/GPU I/O ilerleyebilir; döngüsel bağımlılıklar yok |
 | [İE-06](https://github.com/nopenstudio/nopen-vram-swap/issues/24) | P0 | Worker/GPU arızası kurtarması | Açık | Arıza sonrası ACK sayfalarının doğrulanmış şekilde kurtarılması |
 | [İE-07](https://github.com/nopenstudio/nopen-vram-swap/issues/25) | P1 | ublk/IPC concurrency, backlog ve gecikme | Açık | Yük altında adil kuyruklama, doğru ordering ve p50/p95/p99 raporları |
@@ -83,6 +83,12 @@
 - [ADR-003](adr/ADR-003-acknowledged-swap-page-protection.md), [PR #32](https://github.com/nopenstudio/nopen-vram-swap/pull/32): **SSD authoritative COW/journal, GPU optional cache** kararı; 4 GiB maliyet ve arıza matrisi, atomic commit/ACK, same-boot replay/generation sözleşmesi.
 - [İE-03 Python referans modeli](../tools/ie03_ack_model.py): sadece bellekteki journal simülasyonu; GPU, disk, kernel swap veya gerçek kriptografi içermez. **İE-06 gerçek C/storage/ublk recovery uygulaması hâlâ P0 blocker.**
 - Seçilen güvenli profilin yazma yolu **SSD commit hızına bağlıdır**; GPU-only kernel swap güvenli değildir. `KERNEL_SWAP_BLOCKED` korunur.
+
+## İE-04 salt okunur VRAM/GTT kanıt altyapısı (3 Kasım 2026)
+
+- [İE-04 raporu](reports/2026-11-03-ie04-amdgpu-residency-audit.md) ve [PR #33](https://github.com/nopenstudio/nopen-vram-swap/pull/33): global GPU sysfs ve seçili PID'nin DRM resident/total GTT/VRAM göstergeleri, PID reuse ve yetki/görünürlük sınırlamaları.
+- Kaynak ve fixture testleri **physical pin, BO migration veya game memory budget kanıtı değildir**. Olası VRAM↓/GTT↑ korelasyonu gerçek BO taşınması olarak etiketlenmez.
+- İE-04 **P0 açık kalır**: fiziksel per-BO/TTM migrasyon kanıtı, desteklenen non-evictable mekanizma veya cache-only güvenlik kriterleri, GPU pressure ve allocation failure testleri henüz yapılmadı. `KERNEL_SWAP_BLOCKED`.
 
 ## Olay ve test arşivi
 
