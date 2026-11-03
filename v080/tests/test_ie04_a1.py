@@ -91,8 +91,9 @@ with TemporaryDirectory() as dirname:
     assert "REAL_GPU_MUST_USE_REAL_HOST_SENSORS" in runner.policy(
         bad, get_euid=lambda: 1000)["reasons"]
 
-    bad = runner.make_parser().parse_args(
-        argv(pci_root, meminfo, swaps).replace(PCI, "0000:05:00.0"))
+    wrong_bdf = ["0000:05:00.0" if x == PCI else x
+                 for x in argv(pci_root, meminfo, swaps)]
+    bad = runner.make_parser().parse_args(wrong_bdf)
     assert "VRAM_PROBE_FAILED" in runner.policy(
         bad, get_euid=lambda: 1000)["reasons"]
 
