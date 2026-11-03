@@ -2,7 +2,7 @@
 
 **Default and only approved status on the primary computer: `KERNEL_SWAP_BLOCKED`.**
 
-**v0.9.0 crash-stabilization governance:** [Issue #18](https://github.com/nopenstudio/nopen-vram-swap/issues/18) and [10 critical work orders](CRITICAL_WORK_ORDERS_v0.9.md). No new release or real SWAP authorization exists. PR #17's safety gate is on its draft branch until reviewed and merged; never assume a policy text has disabled every historical launcher.
+**v0.9.0 crash-stabilization governance:** [Issue #18](https://github.com/nopenstudio/nopen-vram-swap/issues/18) and [10 critical work orders](CRITICAL_WORK_ORDERS_v0.9.md). No new release or real SWAP authorization exists. [PR #34](https://github.com/nopenstudio/nopen-vram-swap/pull/34) adds **source-level fail-closed guards** to physical ublk, legacy pilot/start-4g and direct4g. Until merged and audited, old checkouts remain unsafe. Even after merge, DO NOT reactivate live kernel swap: driver reclaim and SSD/ublk recovery unresolved.
 
 
 ### Allowed by default

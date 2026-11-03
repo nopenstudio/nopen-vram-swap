@@ -38,7 +38,8 @@ add_test(NAME ie02_reclaim_source_regression
 set_tests_properties(ie02_reclaim_source_regression PROPERTIES
     PASS_REGULAR_EXPRESSION "IE02_SOURCE_AUDIT_TEST_PASS" TIMEOUT 10)
 
-# IE-03: ACK/generation/replay is a CPU-only policy model, NOT durable storage.
+# IE-03: CPU reference ACK contract and C filesystem-backed COW journal prototype.
+# Neither constitutes a recoverable ublk kernel-swap backend.
 add_test(NAME ie03_ack_generation_contract
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/tests/test_ie03_ack_model.py")
 set_tests_properties(ie03_ack_generation_contract PROPERTIES
@@ -49,3 +50,10 @@ add_test(NAME ie04_residency_accounting_readonly_fixture
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/tests/test_ie04_residency_observe.py")
 set_tests_properties(ie04_residency_accounting_readonly_fixture PROPERTIES
     PASS_REGULAR_EXPRESSION "IE04_RESIDENCY_OBSERVER_FIXTURE_PASS" TIMEOUT 10)
+
+# IE-03: verify the real COW store is wired to *isolated VM raw ublk*
+# only; still no approved physical kernel swap path.
+add_test(NAME ie03_vm_raw_ublk_wiring_static
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/tests/test_ie03_ublk_wiring.py")
+set_tests_properties(ie03_vm_raw_ublk_wiring_static PROPERTIES
+    PASS_REGULAR_EXPRESSION "IE03_UBLK_RAW_WIRING_PASS" TIMEOUT 10)

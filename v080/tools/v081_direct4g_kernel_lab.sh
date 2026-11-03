@@ -39,7 +39,13 @@ case "$action" in
     python3 "$repo/v080/tools/v081_direct4g_preflight.py"
     echo "V081_DIRECT4G_PREFLIGHT_NOTE physical host swapon NOT authorized by this check"
     exit 0;;
-  start) :;;
+  start)
+    # Issue #10: no safe GPU-only page recovery or reclaim-independent
+    # completion exists. Keep RAW-only non-swap pilot available elsewhere,
+    # but never interpret a longer IPC deadline as kernel swap safety.
+    echo "V081_DIRECT4G_KERNEL_SWAP_BLOCKED issue=10 reason=unrecoverable_acknowledged_pages" >&2
+    echo "Use mock tests or the separately guarded raw-only (NO SWAP) diagnostic." >&2
+    exit 77;;
   *)
     echo "Usage: bash v080/tools/v081_direct4g_kernel_lab.sh preflight|status"
     echo "       sudo env NOPEN_V081_DIRECT4G_ACK=$START_ACK bash v080/tools/v081_direct4g_kernel_lab.sh start"

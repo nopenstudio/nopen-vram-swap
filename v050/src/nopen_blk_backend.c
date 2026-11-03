@@ -24,6 +24,8 @@ struct nopen_blk_backend {
     size_t pages;
     pthread_mutex_t lock;
     const char *last_error;
+    int meta_locked;
+    int staging_locked;
 };
 static int fail(nopen_blk_backend *b,const char *msg,int error) {
     if(b)b->last_error=msg;
@@ -56,26 +58,41 @@ int nopen_blk_open(nopen_blk_backend **out,nopen_backend backend,size_t mib) {
         free(b->staging);free(b->meta);free(b);
         return -ENOMEM;
     }
-    if(nopen_store_open(&b->store,backend,mib)!=0) {
-        pthread_mutex_destroy(&b->lock);
-        free(b->staging);free(b->meta);free(b);
-        return -EIO;
-    }
-    /* Only on physical direct-VRAM kernel-SWAP experiment: metadata
-     * belongs in non-reclaimable system RAM. 4GiB SWAP has about 16MiB
-     * of this table; failure must block swapon before any Linux page
-     * depends on it. Does not mlock OpenCL's internal runtime heaps. */
+    /* IE-02: all mandatory host metadata and stage buffers must be ready
+     * BEFORE any OpenCL runtime initialization and before worker READY.
+     * This only addresses OUR memory, not allocations inside AMDGPU/CL. */
+    memset(b->staging,0,NOPEN_BLK_MAX_BYTES);
+    const char *strict=getenv("NOPEN_SWAP_SERVER_STRICT");
     const char *prefill=getenv("NOPEN_VRAM_DIRECT_PREFILL");
-    if(geteuid()==0 && prefill && strcmp(prefill,"1")==0) {
-        if(mlock(b->meta,b->pages*sizeof(*b->meta))!=0 ||
-           mlock(b->staging,NOPEN_BLK_MAX_BYTES)!=0) {
-            fprintf(stderr,"NOPEN_DIRECT_METADATA_MLOCK_REFUSED errno=%d\n",errno);
-            nopen_store_close(b->store);
+    const int require_lock=(strict && strcmp(strict,"1")==0) ||
+        (geteuid()==0 && prefill && strcmp(prefill,"1")==0);
+    if(require_lock) {
+        if(mlock(b->meta,b->pages*sizeof(*b->meta))!=0) {
+            fprintf(stderr,"NOPEN_DIRECT_METADATA_MLOCK_REFUSED"
+                           " resource=meta errno=%d\n",errno);
             pthread_mutex_destroy(&b->lock);
             free(b->staging);free(b->meta);free(b);
             return -ENOMEM;
         }
-        fprintf(stderr,"NOPEN_DIRECT_METADATA_MLOCK_PASS pages=%zu\n",b->pages);
+        b->meta_locked=1;
+        if(mlock(b->staging,NOPEN_BLK_MAX_BYTES)!=0) {
+            fprintf(stderr,"NOPEN_DIRECT_METADATA_MLOCK_REFUSED"
+                           " resource=staging errno=%d\n",errno);
+            munlock(b->meta,b->pages*sizeof(*b->meta));
+            pthread_mutex_destroy(&b->lock);
+            free(b->staging);free(b->meta);free(b);
+            return -ENOMEM;
+        }
+        b->staging_locked=1;
+        fprintf(stderr,"NOPEN_DIRECT_METADATA_MLOCK_PASS pages=%zu"
+                       " runtime_host_allocations_pinned=NO\n",b->pages);
+    }
+    if(nopen_store_open(&b->store,backend,mib)!=0) {
+        if(b->staging_locked)munlock(b->staging,NOPEN_BLK_MAX_BYTES);
+        if(b->meta_locked)munlock(b->meta,b->pages*sizeof(*b->meta));
+        pthread_mutex_destroy(&b->lock);
+        free(b->staging);free(b->meta);free(b);
+        return -EIO;
     }
     b->last_error="ok";
     *out=b;
@@ -84,6 +101,8 @@ int nopen_blk_open(nopen_blk_backend **out,nopen_backend backend,size_t mib) {
 void nopen_blk_close(nopen_blk_backend *b) {
     if(!b)return;
     nopen_store_close(b->store);
+    if(b->staging_locked)munlock(b->staging,NOPEN_BLK_MAX_BYTES);
+    if(b->meta_locked)munlock(b->meta,b->pages*sizeof(*b->meta));
     pthread_mutex_destroy(&b->lock);
     free(b->staging);free(b->meta);free(b);
 }

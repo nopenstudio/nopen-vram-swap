@@ -17,7 +17,13 @@ Linux'a verilecek başarılı swap WRITE cevabı yalnızca verinin **bağımsız
 - Bağımsız SSD shadow 4 GiB veriyi host RAM'i aynı miktarda tüketmeden tutabilir; ancak her ACK'de SSD write/commit gecikmesi vardır. Bu modun gerçek tarifi **SSD-backed swap with optional VRAM cache**; 40 GB/sn kernel swap olduğu iddia edilmez.
 - GPU-only hafif, kayıp tolere edebilen **cooperative/process-local pager** ayrı bir gelecek ürün rotası olabilir. Linux çekirdeğinin önceden ACK verilmiş swap sayfaları için seçilen güvenlik profili değildir.
 
-**Bu karar tasarımdır, uygulama değildir.** P0 veri kurtarma kodu İE-06 (#24), reclaim bağımsız I/O İE-05 (#23), fiziksel VRAM residency İE-04 (#22), canlı donanım kabulü İE-10 (#28) kapsamında açık kalır.
+**Bu mimari karar artık PR #34 içinde test edilmiş bir COW/durable-store prototipine dönüşmeye başladı; ancak üretim kernel swap uygulaması değildir.** P0 veri kurtarma kodu İE-06 (#24), reclaim bağımsız I/O İE-05 (#23), fiziksel VRAM residency İE-04 (#22), canlı donanım kabulü İE-10 (#28) kapsamında açık kalır.
+
+## 1A. 3 Kasım tarihli gerçek C uygulaması: prototip güvenlik sınırı
+
+[PR #34](https://github.com/nopenstudio/nopen-vram-swap/pull/34) içinde `v070/src/nopen_durable_store.c` veriyi **iki ayrı sabit disk yuvasında COW** olarak tutuyor: 4 KiB sayfa, en fazla 16 sayfalı istek, bağımsız `fdatasync(data)`, tek checksum'lı işlem kaydı + `fdatasync(journal)`, sonra başarı. Aynı boot epoch ile yeniden açılıp log replay/active-slot checksum doğrulaması yapılıyor. Kaybolan ACK'e karşı request_id aynı ise idempotent, farklı payload ise EEXIST; eksik log kuyruğu tamamlanmış önceki nesli bozmuyor. **Bu gerçek dosya I/O'sudur**, Python referans modelinden ayrı test edilir.
+
+`v070/experimental/ublk/nopen_ublk_swap_target.cpp` yalnızca **izole VM MOCK/raw blok deneyinde** `transactional-ssd` yoluna bağlandı. Kernel swap arayüzünde üretim kullanımı, gerçek host ublk daemon reattach, log compaction, şifreleme, BO pinleme ve reclaim bağımsız ilerleme **YOK**. 4 GiB örnek için çift slot alanı 8 GiB artı journal'dır. Eski `nopen_shadow` in-place disk modu bu COW prototipiyle otomatik yer değiştirmemiştir ve fiziksel SWAP engeli devam eder.
 
 ## 2. 4 GiB kapasite için kaynak / risk tablosu
 

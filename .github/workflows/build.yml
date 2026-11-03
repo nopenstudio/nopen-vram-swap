@@ -21,6 +21,10 @@ jobs:
         run: cmake --build build --parallel 2
       - name: Run canonical reliability, IPC and safety regressions
         run: ctest --test-dir build -R '^(repository_|v060_isolated_gpu_process_deadline_and_ipc_checksum|v060_issue10_trace_mock_only|v070_fatal_gpu_ipc_forensic_log|ie02_|ie03_|ie04_|v083_|v084_|v085_)' --output-on-failure
+      - name: Enforce historical real-SWAP and worker readiness safety gates
+        run: python3 tests/test_ie01_ie02_runtime_guards.py
+      - name: Enforce 4GiB direct launcher fail-closed behavior
+        run: python3 v080/tests/test_v081_direct4g_launcher.py
       - name: Verify read-only AMDGPU preflight/observer safety contract
         run: python3 v085/tests/test_v085_safety_contract.py
       - name: Confirm no GPU or kernel swap test is started in CI

@@ -122,6 +122,44 @@ VRAM/GTT and MemAvailable samples while holding. It will print
 `V085_HOLDER_PASS` after release, but **never** claims driver partition,
 application-visible 12GiB capacity or guaranteed physical VRAM pinning.
 
+## Issue #10: independent queue and worker deadlines (draft)
+
+The experimental isolated IPC now offers `nopen_isolated_open_with_policy()`.
+Two CLOCK_MONOTONIC budgets are enforced independently: queue admission
+before obtaining the serialized worker lock, then request/response time once
+the IPC request is dispatched.
+
+A queue timeout returns `-EAGAIN` without contacting or killing the worker.
+A dispatched timeout or a malformed worker reply still makes the context
+terminal. Already acknowledged GPU-only swap pages do NOT become recoverable
+by merely restarting the worker. A blocked kernel GPU driver may remain
+uninterruptible even after the user-space deadline. These budgets do NOT
+prove kernel reclaim forward progress, safe ublk completion, or GPU reset
+survivability.
+
+The isolated ublk laboratory adapter uses 5000 ms for each budget instead
+of the historical hard-coded 2000 ms IPC timeout. This is an experimental
+failure-reporting setting, NOT a certified safe swap timeout. Existing SSD
+shadow fallback behavior is unchanged.
+
+**Safety enforcement:** The 4 GiB GPU-only launcher refuses its `start`
+action unconditionally with `V081_DIRECT4G_KERNEL_SWAP_BLOCKED`. Read-only
+`preflight`, `status`, and guarded `stop` remain available. The separate
+256 MiB raw-ublk experiment (NO SWAP) remains separately guarded.
+
+Mock-only regression (no GPU, sudo, ublk or kernel swap):
+
+```sh
+cmake -S v085 -B build-v085-ipc -DNOPEN_OPENCL=OFF
+cmake --build build-v085-ipc --parallel 2
+ctest --test-dir build-v085-ipc -R '^(v060_isolated_gpu_process_deadline_and_ipc_checksum|v060_issue10_trace_mock_only|v083_mock_worker_timeout_crash_bad_reply_failclosed|v084_mock_alive_worker_stalled_read_write_timeout)$' --output-on-failure
+```
+
+Mock tests cover successful requests, finite busy-worker latency, rejected
+queued writes, stalled dispatched I/O, worker crash and malformed replies.
+They cannot certify physical GPU memory pinning or swap recovery.
+The release gate remains `KERNEL_SWAP_BLOCKED`.
+
 ## Next engineering phases (NOT shipped)
 
 B2. Independently measure game coexistence only after the bounded GPU-only

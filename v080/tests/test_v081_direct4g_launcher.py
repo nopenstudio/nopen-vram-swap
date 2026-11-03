@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Static safety regression: no host SSD shadow in direct 4GiB launcher."""
 from pathlib import Path
+import subprocess
 
 root=Path(__file__).resolve().parents[2]
 launch=(root/"v080/tools/v081_direct4g_kernel_lab.sh").read_text()
@@ -33,6 +34,12 @@ checks={
 }
 for name,passed in checks.items():
     assert passed,f"V081_DIRECT4G_SAFETY_FAIL check={name}"
+# The deprecated GPU-only start route must return BEFORE sudo, GPU, ublk,
+# mkswap or swapon code. A read-only CI invocation is safe without root.
+blocked=subprocess.run(["bash",str(root/"v080/tools/v081_direct4g_kernel_lab.sh"),
+                        "start"],text=True,capture_output=True,timeout=3)
+assert blocked.returncode==77,blocked
+assert "V081_DIRECT4G_KERNEL_SWAP_BLOCKED" in blocked.stderr,blocked.stderr
 print(f"V081_DIRECT4G_SAFETY_PASS checks={len(checks)}"
       " kernel_swap=NOT_ACTIVATED disks_untouched=YES"
       " existing_zram_untouched=YES")

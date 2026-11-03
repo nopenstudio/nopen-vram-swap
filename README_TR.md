@@ -7,6 +7,10 @@
 
 > **GÜVENLİK: KERNEL_SWAP_BLOCKED.** Eski NBD ve 4 GiB ublk üzerinden etkinleştirilen gerçek SWAP denemeleri ağır hatalara ve tam sistem donmasına yol açtı. Ana bilgisayarında arşivdeki SWAP başlatıcılarını çalıştırma. Mevcut **zram** yapılandırmasını koru.
 
+## Çökme yamalarının mevcut durumu
+
+[PR #34](https://github.com/nopenstudio/nopen-vram-swap/pull/34) gerçek kaynak kodu değiştiriyor: worker staging/metadata erken hazırlanıyor, IPC admission in-flight süreden ayrılıyor, eski gerçek kernel swap başlatıcıları kod seviyesinde engelleniyor. [C disk COW motoru](v070/src/nopen_durable_store.c) `fdatasync`, checksum/transaction kayıtları ve same-boot reopen prototipi sunuyor; [izole VM'deki mock/ham ublk](v070/experimental/ublk/nopen_ublk_swap_target.cpp) için bağlı. **Bu kod gerçek GPU swap'a etkinleştirilmemiştir, şifreli depo/ublk daemon reattach ve reclaim bağımsızlığı tamamlanmamıştır.**
+
 ## Gerçekten neler doğrulandı?
 
 | Alan | Başarı | Kanıtlanmayan |
@@ -59,8 +63,8 @@ python3 v085/tools/reserved_vram_observe.py --samples 5 --interval-seconds 1
 
 - [Ana takip: Issue #18](https://github.com/nopenstudio/nopen-vram-swap/issues/18)
 - [İş emirleri, kabul koşulları ve sürüm güvenlik kapıları](docs/CRITICAL_WORK_ORDERS_v0.9.md)
-- [İE-01 / PR #17](https://github.com/nopenstudio/nopen-vram-swap/pull/17): ilk IPC deadline düzenlemesi mock testleri geçti, ancak henüz birleşmiş veya tam güvenli swap değil.
-- [İE-02 / Reclaim bağımsızlığı incelemesi](https://github.com/nopenstudio/nopen-vram-swap/issues/20): sıradaki çalışma.
+- [İE-01..04 / çekirdek C/C++ güvenlik yamaları, PR #34](https://github.com/nopenstudio/nopen-vram-swap/pull/34): IPC deadline, READY öncesi RAM hazırlığı, disk COW işlem motoru ve fiziksel kernel swap engelleri. Gerçek swap hâlâ yasak.
+- [İE-02 kaynak analizi](https://github.com/nopenstudio/nopen-vram-swap/issues/20): tamamlandı; reclaim için gerçek driver/ublk ilerleme garantisi İE-05 kapsamındadır.
 
 **v0.9.0 henüz yayınlanmadı ve etiketi oluşturulmadı.** İş emirleri kapanmadan gerçek kernel swap etkinleştirilmeyecek.
 

@@ -13,8 +13,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/mman.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <stdatomic.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -24,9 +26,12 @@ struct nopen_isolated_io {
     pid_t pid;
     size_t pages;
     unsigned timeout_ms;
+    unsigned admission_timeout_ms;
+    _Atomic uint64_t admission_timeouts;
     nopen_backend backend;
     int alive;
     unsigned char *staging;
+    int staging_locked;
     pthread_mutex_t lock;
     nopen_isolated_stats stats;
 };
@@ -121,7 +126,8 @@ static int fail_io(nopen_isolated_io *r,int code,uint32_t op,
         "NOPEN_IPC_FATAL monotonic_ms=%" PRIu64
         " backend=%s worker_pid=%ld op=%s offset=%" PRIu64
         " bytes=%zu stage=%s errno=%d deadline_ms=%u"
-        " fail_closed=YES no_global_swap_recovery=YES\n",
+        " fail_closed=YES fatal_context=YES"
+        " no_global_swap_recovery=YES acknowledged_gpu_only_pages_unrecoverable=YES\n",
         monotonic_ms(),r->backend==NOPEN_STORE_OPENCL?"opencl":"mock",
         (long)r->pid,op==NOPEN_IPC_READ?"READ":
         op==NOPEN_IPC_WRITE?"WRITE":"INJECT",offset,bytes,stage,
@@ -130,36 +136,56 @@ static int fail_io(nopen_isolated_io *r,int code,uint32_t op,
     terminate_child(r);
     return code;
 }
-int nopen_isolated_open(nopen_isolated_io **out,nopen_backend backend,
-                       size_t pool_mib,unsigned timeout_ms,
-                       const char *absolute_worker_path) {
+int nopen_isolated_open_with_policy(nopen_isolated_io **out,nopen_backend backend,
+                        size_t pool_mib,
+                        const nopen_isolated_deadline_policy *policy,
+                        const char *absolute_worker_path) {
     if(!out)return -EINVAL;
     *out=NULL;
-    if(!absolute_worker_path || *absolute_worker_path!='/' ||
+    if(!policy || !absolute_worker_path || *absolute_worker_path!='/' ||
        access(absolute_worker_path,X_OK)!=0 ||
        (backend!=NOPEN_STORE_OPENCL && backend!=NOPEN_STORE_MOCK) ||
        pool_mib<4 || pool_mib>4096 ||
-       timeout_ms<50 || timeout_ms>5000)return -EINVAL;
+       policy->io_timeout_ms<50 || policy->io_timeout_ms>5000 ||
+       policy->admission_timeout_ms<1 ||
+       policy->admission_timeout_ms>5000)return -EINVAL;
     nopen_isolated_io *r=calloc(1,sizeof(*r));
     if(!r)return -ENOMEM;
     r->fd=-1;
     r->pid=-1;
     r->pages=pool_mib*(1024u*1024u/NOPEN_PAGE_SIZE);
-    r->timeout_ms=timeout_ms;
+    r->timeout_ms=policy->io_timeout_ms;
+    r->admission_timeout_ms=policy->admission_timeout_ms;
+    atomic_init(&r->admission_timeouts,0);
     r->backend=backend;
     r->staging=malloc(NOPEN_BLK_MAX_BYTES);
     if(!r->staging){free(r);return -ENOMEM;}
+    memset(r->staging,0,NOPEN_BLK_MAX_BYTES); /* fault in before worker READY */
+    const char *strict=getenv("NOPEN_SWAP_SERVER_STRICT");
+    if(strict && strcmp(strict,"1")==0) {
+        if(mlock(r->staging,NOPEN_BLK_MAX_BYTES)!=0) {
+            fprintf(stderr,"NOPEN_IPC_OPEN_REFUSED reason=parent_staging_mlock"
+                           " kernel_swap=BLOCKED errno=%d\n",errno);
+            free(r->staging);free(r);return -ENOMEM;
+        }
+        r->staging_locked=1;
+    }
     if(pthread_mutex_init(&r->lock,NULL)!=0) {
+        if(r->staging_locked)munlock(r->staging,NOPEN_BLK_MAX_BYTES);
         free(r->staging);free(r);return -ENOMEM;
     }
     int sv[2];
     if(socketpair(AF_UNIX,SOCK_STREAM,0,sv)!=0) {
-        pthread_mutex_destroy(&r->lock);free(r->staging);free(r);return -EIO;
+        pthread_mutex_destroy(&r->lock);
+        if(r->staging_locked)munlock(r->staging,NOPEN_BLK_MAX_BYTES);
+        free(r->staging);free(r);return -EIO;
     }
     posix_spawn_file_actions_t act;
     if(posix_spawn_file_actions_init(&act)!=0) {
         close(sv[0]);close(sv[1]);
-        pthread_mutex_destroy(&r->lock);free(r->staging);free(r);return -EIO;
+        pthread_mutex_destroy(&r->lock);
+        if(r->staging_locked)munlock(r->staging,NOPEN_BLK_MAX_BYTES);
+        free(r->staging);free(r);return -EIO;
     }
     /* Close the parent side BEFORE replacing fd 3 to avoid accidental close
      * when socketpair originally returned descriptor 3 for sv[0]. */
@@ -177,21 +203,65 @@ int nopen_isolated_open(nopen_isolated_io **out,nopen_backend backend,
     close(sv[1]);
     if(spawn_rc!=0) {
         close(sv[0]);
-        pthread_mutex_destroy(&r->lock);free(r->staging);free(r);
+        pthread_mutex_destroy(&r->lock);
+        if(r->staging_locked)munlock(r->staging,NOPEN_BLK_MAX_BYTES);
+        free(r->staging);free(r);
         return -EIO;
     }
     r->fd=sv[0];r->pid=pid;r->alive=1;r->stats.child_alive=1;
-    uint64_t deadline=monotonic_ms()+timeout_ms;
+    uint64_t deadline=monotonic_ms()+r->timeout_ms;
     nopen_ipc_msg ready={0};
     const int rc=recv_exact(r->fd,&ready,sizeof ready,deadline);
     if(rc!=0 || ready.magic!=NOPEN_IPC_MAGIC || ready.op!=NOPEN_IPC_READY ||
        ready.status!=0) {
         terminate_child(r);
-        pthread_mutex_destroy(&r->lock);free(r->staging);free(r);
+        pthread_mutex_destroy(&r->lock);
+        if(r->staging_locked)munlock(r->staging,NOPEN_BLK_MAX_BYTES);
+        free(r->staging);free(r);
         return rc==-ETIMEDOUT?-ETIMEDOUT:-EIO;
     }
     *out=r;
     return 0;
+}
+/* Existing callers keep their historical single-budget behavior. */
+int nopen_isolated_open(nopen_isolated_io **out,nopen_backend backend,
+                        size_t pool_mib,unsigned timeout_ms,
+                        const char *absolute_worker_path) {
+    const nopen_isolated_deadline_policy policy={
+        .admission_timeout_ms=timeout_ms,.io_timeout_ms=timeout_ms
+    };
+    return nopen_isolated_open_with_policy(out,backend,pool_mib,
+                                            &policy,absolute_worker_path);
+}
+/* Queue admission can expire WITHOUT dispatching any IPC or killing the
+ * existing worker. CLOCK_MONOTONIC avoids realtime timed-lock drift.
+ * -EAGAIN is a local admission rejection, never a completed GPU operation. */
+static int admit(nopen_isolated_io *r) {
+    const uint64_t start=monotonic_ms();
+    if(!start)return -EIO;
+    const uint64_t deadline=start+r->admission_timeout_ms;
+    for(;;) {
+        const int rc=pthread_mutex_trylock(&r->lock);
+        if(rc==0) {
+            /* The calling thread may have been descheduled after the
+             * mutex became free; never admit after its monotonic budget. */
+            const uint64_t acquired_at=monotonic_ms();
+            if(acquired_at && acquired_at<deadline)return 0;
+            pthread_mutex_unlock(&r->lock);
+            if(!acquired_at)return -EIO;
+            atomic_fetch_add_explicit(&r->admission_timeouts,1,memory_order_relaxed);
+            return -EAGAIN;
+        }
+        if(rc!=EBUSY)return -EIO;
+        const uint64_t now=monotonic_ms();
+        if(!now)return -EIO;
+        if(now>=deadline) {
+            atomic_fetch_add_explicit(&r->admission_timeouts,1,memory_order_relaxed);
+            return -EAGAIN;
+        }
+        struct timespec delay={.tv_sec=0,.tv_nsec=1000000L};
+        while(nanosleep(&delay,&delay)<0 && errno==EINTR){}
+    }
 }
 static int transfer(nopen_isolated_io *r,uint32_t op,uint64_t off,
                     const void *src,void *dest,size_t bytes) {
@@ -199,7 +269,8 @@ static int transfer(nopen_isolated_io *r,uint32_t op,uint64_t off,
        (bytes%NOPEN_PAGE_SIZE) || (off%NOPEN_PAGE_SIZE) ||
        off/NOPEN_PAGE_SIZE >= r->pages ||
        bytes/NOPEN_PAGE_SIZE > r->pages-off/NOPEN_PAGE_SIZE)return -EINVAL;
-    pthread_mutex_lock(&r->lock);
+    const int admitted=admit(r);
+    if(admitted)return admitted;
     if(!r->alive) {
         pthread_mutex_unlock(&r->lock);
         return -EIO;
@@ -261,6 +332,8 @@ int nopen_isolated_stats_get(nopen_isolated_io *r,nopen_isolated_stats *stats) {
     if(!r || !stats)return -EINVAL;
     pthread_mutex_lock(&r->lock);
     *stats=r->stats;
+    stats->admission_timeouts=
+        atomic_load_explicit(&r->admission_timeouts,memory_order_relaxed);
     pthread_mutex_unlock(&r->lock);
     return 0;
 }
@@ -317,5 +390,6 @@ void nopen_isolated_close(nopen_isolated_io *r) {
     terminate_child(r);
     pthread_mutex_unlock(&r->lock);
     pthread_mutex_destroy(&r->lock);
+    if(r->staging_locked)munlock(r->staging,NOPEN_BLK_MAX_BYTES);
     free(r->staging);free(r);
 }

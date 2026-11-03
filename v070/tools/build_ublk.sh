@@ -27,6 +27,7 @@ g++ -std=c++20 -Wall -Wextra -Wpedantic \
   "$vendor/targets/ublksrv_tgt.cpp" \
   "$repo/v070/experimental/ublk/nopen_ublk_swap_target.cpp" \
   "$build/libnopen_shadow.a" \
+  "$build/libnopen_durable_store.a" \
   "$build/v060/libnopen_isolated_io.a" \
   "$build/v060/libnopen_recovery.a" \
   "$build/v060/v050/libnopen_blk_backend.a" \
