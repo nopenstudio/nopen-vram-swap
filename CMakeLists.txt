@@ -27,3 +27,13 @@ add_test(NAME repository_structure_and_safety
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/tests/repo_contract.py")
 set_tests_properties(repository_structure_and_safety PROPERTIES
     PASS_REGULAR_EXPRESSION "REPOSITORY_CONTRACT_PASS" TIMEOUT 10)
+
+# IE-02: static source inventory and model-only regression. NO GPU / SWAP.
+add_test(NAME ie02_reclaim_source_inventory
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/tools/ie02_reclaim_audit.py" --ci)
+set_tests_properties(ie02_reclaim_source_inventory PROPERTIES
+    PASS_REGULAR_EXPRESSION "IE02_SOURCE_AUDIT_PASS" TIMEOUT 10)
+add_test(NAME ie02_reclaim_source_regression
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/tests/test_ie02_reclaim_audit.py")
+set_tests_properties(ie02_reclaim_source_regression PROPERTIES
+    PASS_REGULAR_EXPRESSION "IE02_SOURCE_AUDIT_TEST_PASS" TIMEOUT 10)
