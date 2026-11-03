@@ -328,11 +328,15 @@ def benchmark_once(args: argparse.Namespace, bench: Path, worker: Path,
                 # or active unsafe swap is a hard safety stop.
                 error = str(exc)
                 raise
+            # Busy-percent rises because the benchmark itself uses the GPU.
+            # Record that telemetry, but don't mistake our own work for a
+            # preexisting active game. Fail closed if VRAM headroom collapses.
             if args.backend == "opencl":
                 gpu = select_gpu(args.pci_root, args.pci)
-                nowbusy = busy_percent(gpu)
-                if nowbusy is None or nowbusy > MAX_GPU_BUSY_PERCENT:
-                    raise ValueError("GPU busy/unknown during real OpenCL experiment")
+                free_now = (read_counter(gpu, "mem_info_vram_total") -
+                            read_counter(gpu, "mem_info_vram_used"))
+                if free_now < MIN_FREE_VRAM_MIB * MIB:
+                    raise ValueError("VRAM headroom fell below safety floor")
             time.sleep(0.05)
         out, err = proc.communicate(timeout=2)
     except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
