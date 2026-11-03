@@ -9,14 +9,32 @@ extern "C" {
 typedef struct nopen_isolated_io nopen_isolated_io;
 typedef struct {
     uint64_t operations, timeouts, child_crashes, io_errors;
+    /* Request rejected before IPC dispatch because the shared worker was busy.
+     * No GPU/worker data path was touched for this request. */
+    uint64_t admission_timeouts;
     int child_alive;
 } nopen_isolated_stats;
-/* Linux-only process isolation: parent owns the kernel-block callback while a
- * worker process owns the OpenCL context. Every operation has a 50..5000 ms
- * response deadline. Timeout -> worker SIGKILL (no blocking waitpid) and
- * permanently fail-closed. No transparent swap and no recovery after crash.
- * A stuck kernel GPU driver cannot be reset by SIGKILL: this isolates the
- * ublk callback's response deadline, NOT kernel liveness. */
+/* Two independent, monotonic-clock budgets:
+ * admission_timeout_ms: how long a caller waits to acquire the IPC lock;
+ * io_timeout_ms: total send/worker/receive deadline AFTER admission.
+ * Neither controls a blocked OpenCL driver, kernel ublk timeout, GPU reset,
+ * or recoverability of already acknowledged GPU-only SWAP pages.
+ * A queue rejection returns -EAGAIN without terminating the worker.
+ * A dispatched request with uncertain outcome remains fatal to this context.
+ */
+typedef struct {
+    unsigned admission_timeout_ms; /* 1..5000 */
+    unsigned io_timeout_ms;        /* 50..5000 */
+} nopen_isolated_deadline_policy;
+int nopen_isolated_open_with_policy(nopen_isolated_io **out,
+                       nopen_backend backend,size_t pool_mib,
+                       const nopen_isolated_deadline_policy *policy,
+                       const char *absolute_worker_path);
+/* Legacy one-budget API: both queue admission and dispatched IPC use the
+ * same timeout_ms (50..5000). New callers should explicitly set both budgets.
+ * A dispatched timeout closes the channel and marks the context permanently
+ * lost; no restart, replay, or SWAP recovery is promised. SIGKILL is best
+ * effort only: a stuck GPU kernel driver can outlive the process deadline. */
 int nopen_isolated_open(nopen_isolated_io **out,nopen_backend backend,
                        size_t pool_mib,unsigned timeout_ms,
                        const char *absolute_worker_path);
