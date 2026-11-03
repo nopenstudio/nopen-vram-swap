@@ -1,4 +1,7 @@
-# Vulkan architecture decision — 0.10.0-alpha.1
+# Archived architecture | Vulkan 0.10.0-alpha.1
+
+> **HISTORICAL, NOT CURRENT BACKEND.** Vulkan development was discontinued for the active Nopen VRAM SWAP architecture. Current work uses OpenCL on [`develop/v0.8.5`](https://github.com/nopenstudio/nopen-vram-swap/tree/develop/v0.8.5), with a [v0.9.0 crash-stabilization program](https://github.com/nopenstudio/nopen-vram-swap/issues/18). No v0.9.0 release exists. Physical kernel swap remains `KERNEL_SWAP_BLOCKED`. This file is preserved as the original Vulkan-era reasoning, not a live design proposal.
+
 
 ## Why a new backend?
 
