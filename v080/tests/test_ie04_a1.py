@@ -262,6 +262,20 @@ with TemporaryDirectory() as dirname:
             assert float(attrs["read_p99_us"]) > 0
             assert item["physical_vram_allocation_proven"] is False
 
+        # Existing historical 4MiB direct MOCK C tests must not regress.
+        # With 4MiB capacity fully covered, an unwritten page does not
+        # exist; the 256MiB A1 runner, in contrast, requires that check.
+        for kib in (4, 64):
+            legacy = subprocess.run(
+                [str(bench_bin), "--backend", "mock", "--capacity-mib", "4",
+                 "--io-kib", str(kib), "--operations", "250",
+                 "--spread-across-vram", "--worker", str(worker_bin)],
+                capture_output=True, text=True, timeout=50, check=False)
+            assert legacy.returncode == 0, (kib, legacy.stderr, legacy.stdout)
+            assert "NOPEN_VRAM_DIRECT_PASS backend=mock" in legacy.stdout
+            assert "zero_page_checks=0" in legacy.stdout
+            assert "physical_vram_pin=UNPROVEN" in legacy.stdout
+
 print("IE04_A1_MOCK_GUARD_PASS root_denied=YES swap_denied=YES"
       " low_vram_denied=YES low_ram_denied=YES wrong_pci_denied=YES"
       " four_gib_denied=YES drm_missing=UNKNOWN"
