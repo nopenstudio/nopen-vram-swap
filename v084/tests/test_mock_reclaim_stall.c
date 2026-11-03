@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <pthread.h>
 #define PAGE 4096u
 #define CHECK(x) do { if(!(x)) { \
     fprintf(stderr,"V084_STALL_TEST_FAILED line=%d test=%s\n",__LINE__,#x); \
@@ -19,6 +20,65 @@ static uint64_t ticks(void) {
     struct timespec t={0};
     if(clock_gettime(CLOCK_MONOTONIC,&t)!=0)return 0;
     return (uint64_t)t.tv_sec*1000u+(uint64_t)t.tv_nsec/1000000u;
+}
+typedef struct {
+    nopen_isolated_io *ctx;
+    unsigned char dest[PAGE];
+    int result;
+} stalled_call;
+static void *call_read(void *arg) {
+    stalled_call *c=arg;
+    memset(c->dest,0xC7,sizeof c->dest);
+    c->result=nopen_isolated_read(c->ctx,0,c->dest,sizeof c->dest);
+    return NULL;
+}
+/* Issue #10: distinguish rejection of an UNDISPATCHED queued request from
+ * a timeout of the ACTIVE worker. Neither outcome is a SWAP recovery. */
+static int test_two_budgets(const char *worker) {
+    nopen_isolated_deadline_policy policy={
+        .admission_timeout_ms=35,.io_timeout_ms=500
+    };
+    nopen_isolated_io *ctx=NULL;
+    unsigned char data[PAGE];
+    memset(data,0xA5,sizeof data);
+    CHECK(setenv("NOPEN_V084_MOCK_WAIT_ON_RECLAIM","read",1)==0);
+    CHECK(nopen_isolated_open_with_policy(&ctx,NOPEN_STORE_MOCK,4,
+                                          &policy,worker)==0);
+    CHECK(unsetenv("NOPEN_V084_MOCK_WAIT_ON_RECLAIM")==0);
+    stalled_call first={.ctx=ctx,.result=0};
+    pthread_t thread;
+    CHECK(pthread_create(&thread,NULL,call_read,&first)==0);
+    /* The worker sleeps 10s on READ, so the first thread holds the
+     * serialized parent IPC mutex until its 500ms response timeout. */
+    struct timespec delay={.tv_sec=0,.tv_nsec=80000000L};
+    while(nanosleep(&delay,&delay)<0 && errno==EINTR){}
+    uint64_t begun=ticks();
+    const int queued_rc=nopen_isolated_write(ctx,PAGE,data,PAGE);
+    const uint64_t queued_ms=ticks()-begun;
+    CHECK(queued_rc==-EAGAIN && queued_ms<250u);
+    CHECK(pthread_join(thread,NULL)==0);
+    CHECK(first.result==-ETIMEDOUT);
+    for(size_t i=0;i<sizeof first.dest;i++)CHECK(first.dest[i]==0xC7);
+    nopen_isolated_stats stats={0};
+    CHECK(nopen_isolated_stats_get(ctx,&stats)==0);
+    CHECK(stats.admission_timeouts==1 && stats.timeouts==1);
+    CHECK(stats.operations==0 && stats.io_errors==1 && stats.child_alive==0);
+    CHECK(nopen_isolated_write(ctx,PAGE,data,PAGE)==-EIO);
+    nopen_isolated_close(ctx);
+    ctx=NULL;
+    policy.admission_timeout_ms=0;
+    CHECK(nopen_isolated_open_with_policy(&ctx,NOPEN_STORE_MOCK,4,
+                                          &policy,worker)==-EINVAL);
+    CHECK(ctx==NULL);
+    policy.admission_timeout_ms=35;
+    policy.io_timeout_ms=5001;
+    CHECK(nopen_isolated_open_with_policy(&ctx,NOPEN_STORE_MOCK,4,
+                                          &policy,worker)==-EINVAL);
+    CHECK(ctx==NULL);
+    puts("V084_DEADLINE_POLICY_PASS admission_rejected_before_dispatch=YES"
+         " fatal_dispatched_timeout=YES read_buffer_unchanged=YES"
+         " gpu_only_recovery=NO kernel_swap=NO");
+    return 0;
 }
 int main(int argc,char **argv) {
     CHECK(argc==2 && argv[1][0]=='/');
@@ -60,6 +120,7 @@ int main(int argc,char **argv) {
                " output_unchanged=YES worker_failed_closed=YES"
                " elapsed_ms=%llu\n",op,(unsigned long long)elapsed);
     }
+    CHECK(test_two_budgets(argv[1])==0);
     puts("V084_MOCK_RECLAIM_STALL_PASS worker_alive_before_timeout=YES"
          " synthetic_wait=YES normal_read_write=YES"
          " no_memory_pressure=YES no_gpu=YES no_kernel_swap=YES"
