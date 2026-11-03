@@ -203,10 +203,7 @@ int open_target(ublksrv_dev* dev,int,int,char**) {
             /* Explicitly separate admission from active IPC completion.
              * This bounded lab policy cannot recover GPU-only pages after
              * a dispatched timeout or a GPU reset. Live SWAP remains BLOCKED. */
-            const nopen_isolated_deadline_policy policy={
-                .admission_timeout_ms=5000,
-                .io_timeout_ms=5000
-            };
+            const nopen_isolated_deadline_policy policy={5000u,5000u};
             rc=nopen_isolated_open_with_policy(&state->isolated,backend,
                                                 capacity_mib,&policy,worker);
         }
