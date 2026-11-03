@@ -159,10 +159,10 @@ with TemporaryDirectory() as tmp:
     # F4a: simulate resource change DURING CMake build. The second policy
     # gate must refuse prior to calling even a mocked benchmark function.
     did_run = []
-    runner.build_once = lambda a: (
-        meminfo.write_text("MemAvailable: 500000 kB\n") or
-        (Path("/mock/bench"), Path("/mock/worker"))
-    )
+    def build_then_drop_ram(a):
+        meminfo.write_text("MemAvailable: 500000 kB\n")
+        return Path("/mock/bench"), Path("/mock/worker")
+    runner.build_once = build_then_drop_ram
     runner.benchmark_once = lambda *a: did_run.append(True)
     try:
         result_code, _ = invoke(argv)
