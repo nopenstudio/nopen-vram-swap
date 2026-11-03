@@ -25,6 +25,7 @@ assert actual["source_contract_intact"], actual["missing_or_reordered"]
 assert len(actual["evidence"]) >= 30
 assert all(e["line"] is not None and e["line"] > 0 for e in actual["evidence"])
 assert all(actual["ordering_checks"].values())
+assert actual["ipc_admission_mode"] == "legacy_unbounded_mutex"
 assert actual["gate"] == "KERNEL_SWAP_BLOCKED"
 assert actual["observed_root_cause_of_issue_10"] == "UNKNOWN"
 assert actual["unverified_kernel_or_driver_edges"]
@@ -59,7 +60,24 @@ changed["v060/src/nopen_isolated_io.c"] = changed[
 ].replace("pthread_mutex_lock(&r->lock);", "/* deliberately removed */")
 broken = ie02.audit_texts(changed)
 assert broken["source_contract_intact"] is False
-assert "IPC_MUTEX" in broken["missing_or_reordered"]
+assert "ipc_admission_precedes_request_deadline" in broken["missing_or_reordered"]
+
+# A proper IE-01 style trylock/admission policy should be recognized
+# without falsely certifying kernel reclaim progress.
+changed = dict(texts)
+ipc_path = "v060/src/nopen_isolated_io.c"
+changed[ipc_path] = changed[ipc_path].replace(
+    "pthread_mutex_lock(&r->lock);",
+    "const int admitted=admit(r);\n    if(admitted)return admitted;",
+    1
+)
+changed[ipc_path] += ("\n/* source-only IE-01 fixture */\n"
+                      "pthread_mutex_trylock(&r->lock);\n"
+                      "deadline=start+r->admission_timeout_ms;\n")
+bounded = ie02.audit_texts(changed)
+assert bounded["source_contract_intact"], bounded["missing_or_reordered"]
+assert bounded["ipc_admission_mode"] == "bounded_trylock_policy"
+assert bounded["reclaim_independence_proven"] is False
 
 # Order is important, not only presence of the two fragments.
 path = "v060/src/nopen_isolated_worker.c"
