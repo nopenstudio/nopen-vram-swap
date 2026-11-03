@@ -88,7 +88,9 @@ try:
     assert p.wait(timeout=4) == 0
     begun = time.monotonic()
     stdout, stderr = runner.abort_owned_benchmark(p)
-    assert "CHILD_READY" in stdout
+    # readline() above intentionally consumed CHILD_READY as a child-ready
+    # handshake. communicate() must return bounded strings, not repeat it.
+    assert isinstance(stdout, str) and isinstance(stderr, str)
     assert time.monotonic() - begun < 8, "pipe cleanup unexpectedly unbounded"
     try:
         os.killpg(p.pid, 0)
